@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "pytest-delta"
+version = "0.1.0"
+description = "Run only tests impacted by your code changes (delta-based selection) for pytest."
+authors = ["Cem Alptürk <cem.alpturk@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "pytest_delta", from = "src" }]
+keywords = ["pytest", "plugin", "selective", "impact", "test", "ci", "graph"]
+homepage = "https://github.com/CemAlpturk/pytest-delta"
+repository = "https://github.com/CemAlpturk/pytest-delta"
+classifiers = [
+  "Framework :: Pytest",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.12"
+pytest = ">=7.0"
+
+[tool.poetry.group.dev.dependencies]
+mypy = "*"
+ruff = "*"
+pytest = "*"
+pytest-cov = "*"
+pre-commit = "*"
+types-setuptools = "*"
+
+[tool.poetry.plugins."pytest11"]
+pytest-delta = "pytest_delta.plugin"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
