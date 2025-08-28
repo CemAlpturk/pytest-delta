@@ -26,10 +26,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Run only tests impacted by code changes since last successful run",
     )
     group.addoption(
-        "--delta-file",
+        "--delta-filename",
         action="store",
-        default=".delta.json",
-        help="Path to the delta metadata file (default: .delta.json)",
+        default=".delta",
+        help="Filename for the delta metadata file (default: .delta, .json extension added automatically)",
+    )
+    group.addoption(
+        "--delta-dir",
+        action="store",
+        default=".",
+        help="Directory to store the delta metadata file (default: current directory)",
     )
     group.addoption(
         "--delta-force",
@@ -50,7 +56,15 @@ class DeltaPlugin:
 
     def __init__(self, config: pytest.Config):
         self.config = config
-        self.delta_file = Path(config.getoption("--delta-file"))
+        # Construct delta file path from filename and directory
+        delta_filename = config.getoption("--delta-filename")
+        delta_dir = config.getoption("--delta-dir")
+
+        # Ensure filename has .json extension
+        if not delta_filename.endswith(".json"):
+            delta_filename += ".json"
+
+        self.delta_file = Path(delta_dir) / delta_filename
         self.force_regenerate = config.getoption("--delta-force")
         self.root_dir = Path.cwd()
         self.delta_manager = DeltaManager(self.delta_file)

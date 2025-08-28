@@ -44,7 +44,8 @@ On first run, it will execute all tests and create a `.delta.json` file with met
 ### Command Line Options
 
 - `--delta`: Enable delta-based test selection
-- `--delta-file PATH`: Specify custom path for delta metadata file (default: `.delta.json`)
+- `--delta-filename NAME`: Specify filename for delta metadata file (default: `.delta`, `.json` extension added automatically)
+- `--delta-dir PATH`: Specify directory for delta metadata file (default: current directory)
 - `--delta-force`: Force regeneration of delta file and run all tests
 
 ### Examples
@@ -56,16 +57,35 @@ pytest --delta
 # Force run all tests and regenerate metadata
 pytest --delta --delta-force
 
-# Use custom delta file location
-pytest --delta --delta-file .my-delta.json
+# Use custom delta filename (will become custom-delta.json)
+pytest --delta --delta-filename custom-delta
+
+# Use custom directory for delta file
+pytest --delta --delta-dir .metadata
+
+# Combine custom filename and directory
+pytest --delta --delta-filename my-tests --delta-dir /tmp/deltas
 
 # Combine with other pytest options
 pytest --delta -v --tb=short
 ```
 
+### Migration from Previous Versions
+
+If you were using the old `--delta-file` option, you can migrate as follows:
+
+```bash
+# Old way (no longer supported):
+# pytest --delta --delta-file /path/to/custom.json
+
+# New way:
+pytest --delta --delta-filename custom --delta-dir /path/to
+# This creates: /path/to/custom.json
+```
+
 ## How It Works
 
-1. **First Run**: On the first run (or when `.delta.json` file doesn't exist), all tests are executed and a delta metadata file is created containing the current Git commit hash.
+1. **First Run**: On the first run (or when the delta file doesn't exist), all tests are executed and a delta metadata file is created containing the current Git commit hash.
 
 2. **Change Detection**: On subsequent runs, the plugin:
    - Compares current Git state with the last successful run
@@ -96,7 +116,7 @@ project/
 │   ├── test_module1.py
 │   └── package/
 │       └── test_module2.py
-└── .delta.json                  # Delta metadata (auto-generated)
+└── .delta.json            # Delta metadata (auto-generated, default location)
 ```
 
 ## Configuration

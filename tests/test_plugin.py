@@ -137,7 +137,8 @@ class TestDeltaPlugin:
         """Test plugin initialization."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
-            "--delta-file": ".delta.json",
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
             "--delta-force": False,
         }.get(opt, False)
 
@@ -148,6 +149,31 @@ class TestDeltaPlugin:
         assert not plugin.should_run_all
 
     @patch("pytest_delta.plugin.Repo")
+    def test_delta_file_path_construction(self, mock_repo):
+        """Test delta file path construction from filename and directory."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": "my-delta",
+            "--delta-dir": "/custom/dir",
+            "--delta-force": False,
+        }.get(opt, False)
+
+        plugin = DeltaPlugin(config)
+
+        # Should automatically add .json extension
+        assert plugin.delta_file == Path("/custom/dir/my-delta.json")
+
+        # Test with filename already having .json extension
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": "my-delta.json",
+            "--delta-dir": "/custom/dir",
+            "--delta-force": False,
+        }.get(opt, False)
+
+        plugin2 = DeltaPlugin(config)
+        assert plugin2.delta_file == Path("/custom/dir/my-delta.json")
+
+    @patch("pytest_delta.plugin.Repo")
     def test_no_git_repo_fallback(self, mock_repo):
         """Test fallback when not in a Git repository."""
         from git.exc import InvalidGitRepositoryError
@@ -156,7 +182,8 @@ class TestDeltaPlugin:
 
         config = Mock()
         config.getoption.side_effect = lambda opt: {
-            "--delta-file": ".delta.json",
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
             "--delta-force": False,
         }.get(opt, False)
 
@@ -169,7 +196,8 @@ class TestDeltaPlugin:
         """Test path matching between test and source files."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
-            "--delta-file": ".delta.json",
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
             "--delta-force": False,
         }.get(opt, False)
 
