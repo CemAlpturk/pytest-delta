@@ -53,6 +53,24 @@ class TestDeltaManager:
 
             with pytest.raises(ValueError, match="Failed to load delta metadata"):
                 manager.load_metadata()
+    
+    @patch("pytest_delta.delta_manager.Repo")
+    def test_update_metadata_parent_git_search(self, mock_repo):
+        """Test that update_metadata uses search_parent_directories=True."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+            
+            # Mock successful repo with commit
+            mock_repo_instance = Mock()
+            mock_repo_instance.head.commit.hexsha = "abc123"
+            mock_repo.return_value = mock_repo_instance
+            
+            root_dir = Path(temp_dir)
+            manager.update_metadata(root_dir)
+            
+            # Verify that Repo was called with search_parent_directories=True
+            mock_repo.assert_called_once_with(root_dir, search_parent_directories=True)
 
 
 class TestDependencyAnalyzer:
@@ -239,6 +257,33 @@ class TestDeltaPlugin:
         plugin._analyze_changes()
 
         assert plugin.should_run_all is True
+
+    @patch("pytest_delta.plugin.Repo")
+    def test_non_root_git_repo_detection(self, mock_repo):
+        """Test that git repository is detected even when .git is in parent directory."""
+        from git import Repo
+        
+        # Mock successful Repo creation to simulate finding git repo in parent
+        mock_repo_instance = Mock()
+        mock_repo.return_value = mock_repo_instance
+        
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+        }.get(opt, False)
+
+        plugin = DeltaPlugin(config)
+        plugin._analyze_changes()
+        
+        # Verify that Repo was called with search_parent_directories=True
+        mock_repo.assert_called_with(plugin.root_dir, search_parent_directories=True)
+        
+        # Should not run all tests if git repo is found (but delta file doesn't exist)
+        # In this case should_run_all will be True because delta file doesn't exist
+        # but the important thing is that no InvalidGitRepositoryError was raised
+        assert plugin.should_run_all is True  # Due to missing delta file, not git error
 
     def test_path_matching(self):
         """Test path matching between test and source files."""
