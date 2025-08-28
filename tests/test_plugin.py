@@ -17,7 +17,7 @@ class TestDeltaManager:
     def test_save_and_load_metadata(self):
         """Test saving and loading metadata."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            delta_file = Path(temp_dir) / ".delta"
+            delta_file = Path(temp_dir) / ".delta.json"
             manager = DeltaManager(delta_file)
 
             metadata = {
@@ -34,7 +34,7 @@ class TestDeltaManager:
     def test_load_nonexistent_file(self):
         """Test loading metadata from non-existent file."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            delta_file = Path(temp_dir) / "nonexistent.delta"
+            delta_file = Path(temp_dir) / "nonexistent.delta.json"
             manager = DeltaManager(delta_file)
 
             result = manager.load_metadata()
@@ -43,7 +43,7 @@ class TestDeltaManager:
     def test_load_invalid_json(self):
         """Test loading metadata from invalid JSON file."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            delta_file = Path(temp_dir) / ".delta"
+            delta_file = Path(temp_dir) / ".delta.json"
 
             # Create invalid JSON file
             with open(delta_file, "w") as f:
@@ -137,13 +137,13 @@ class TestDeltaPlugin:
         """Test plugin initialization."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
-            "--delta-file": ".delta",
+            "--delta-file": ".delta.json",
             "--delta-force": False,
         }.get(opt, False)
 
         plugin = DeltaPlugin(config)
 
-        assert plugin.delta_file.name == ".delta"
+        assert plugin.delta_file.name == ".delta.json"
         assert plugin.force_regenerate is False
         assert not plugin.should_run_all
 
@@ -156,7 +156,7 @@ class TestDeltaPlugin:
 
         config = Mock()
         config.getoption.side_effect = lambda opt: {
-            "--delta-file": ".delta",
+            "--delta-file": ".delta.json",
             "--delta-force": False,
         }.get(opt, False)
 
@@ -169,7 +169,7 @@ class TestDeltaPlugin:
         """Test path matching between test and source files."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
-            "--delta-file": ".delta",
+            "--delta-file": ".delta.json",
             "--delta-force": False,
         }.get(opt, False)
 

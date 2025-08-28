@@ -39,12 +39,12 @@ Run tests with delta selection:
 pytest --delta
 ```
 
-On first run, it will execute all tests and create a `.delta` file with metadata.
+On first run, it will execute all tests and create a `.delta.json` file with metadata.
 
 ### Command Line Options
 
 - `--delta`: Enable delta-based test selection
-- `--delta-file PATH`: Specify custom path for delta metadata file (default: `.delta`)
+- `--delta-file PATH`: Specify custom path for delta metadata file (default: `.delta.json`)
 - `--delta-force`: Force regeneration of delta file and run all tests
 
 ### Examples
@@ -57,7 +57,7 @@ pytest --delta
 pytest --delta --delta-force
 
 # Use custom delta file location
-pytest --delta --delta-file .my-delta
+pytest --delta --delta-file .my-delta.json
 
 # Combine with other pytest options
 pytest --delta -v --tb=short
@@ -65,7 +65,7 @@ pytest --delta -v --tb=short
 
 ## How It Works
 
-1. **First Run**: On the first run (or when `.delta` file doesn't exist), all tests are executed and a delta metadata file is created containing the current Git commit hash.
+1. **First Run**: On the first run (or when `.delta.json` file doesn't exist), all tests are executed and a delta metadata file is created containing the current Git commit hash.
 
 2. **Change Detection**: On subsequent runs, the plugin:
    - Compares current Git state with the last successful run
@@ -96,7 +96,7 @@ project/
 │   ├── test_module1.py
 │   └── package/
 │       └── test_module2.py
-└── .delta                  # Delta metadata (auto-generated)
+└── .delta.json                  # Delta metadata (auto-generated)
 ```
 
 ## Configuration

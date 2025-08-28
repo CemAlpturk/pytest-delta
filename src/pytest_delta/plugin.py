@@ -28,8 +28,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption(
         "--delta-file",
         action="store",
-        default=".delta",
-        help="Path to the delta metadata file (default: .delta)",
+        default=".delta.json",
+        help="Path to the delta metadata file (default: .delta.json)",
     )
     group.addoption(
         "--delta-force",
