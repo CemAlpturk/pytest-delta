@@ -270,3 +270,53 @@ class DependencyAnalyzer:
                 return True
 
         return False
+
+    def visualize_dependency_graph(self, dependency_graph: Dict[Path, Set[Path]]) -> str:
+        """
+        Create a text-based visualization of the dependency graph.
+
+        Args:
+            dependency_graph: The dependency graph from build_dependency_graph()
+
+        Returns:
+            A string representation of the dependency graph
+        """
+        if not dependency_graph:
+            return "No dependencies found.\n"
+
+        lines = ["Project Dependency Graph", "=" * 25, ""]
+        
+        # Sort files for consistent output
+        sorted_files = sorted(dependency_graph.keys(), key=lambda p: str(p.relative_to(self.root_dir)))
+        
+        for file_path in sorted_files:
+            dependencies = dependency_graph[file_path]
+            relative_path = file_path.relative_to(self.root_dir)
+            
+            lines.append(f"{relative_path}:")
+            
+            if dependencies:
+                # Sort dependencies for consistent output
+                sorted_deps = sorted(dependencies, key=lambda p: str(p.relative_to(self.root_dir)))
+                for i, dep in enumerate(sorted_deps):
+                    dep_relative = dep.relative_to(self.root_dir)
+                    prefix = "├── " if i < len(sorted_deps) - 1 else "└── "
+                    lines.append(f"    {prefix}{dep_relative}")
+            else:
+                lines.append("    └── (no dependencies)")
+            
+            lines.append("")  # Empty line between files
+        
+        # Add summary statistics
+        total_files = len(dependency_graph)
+        total_dependencies = sum(len(deps) for deps in dependency_graph.values())
+        
+        lines.extend([
+            "Summary",
+            "-" * 7,
+            f"Total files: {total_files}",
+            f"Total dependencies: {total_dependencies}",
+            f"Average dependencies per file: {total_dependencies / total_files:.1f}" if total_files > 0 else "Average dependencies per file: 0",
+        ])
+        
+        return "\n".join(lines)

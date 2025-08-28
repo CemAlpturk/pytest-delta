@@ -261,8 +261,6 @@ class TestDeltaPlugin:
     @patch("pytest_delta.plugin.Repo")
     def test_non_root_git_repo_detection(self, mock_repo):
         """Test that git repository is detected even when .git is in parent directory."""
-        from git import Repo
-        
         # Mock successful Repo creation to simulate finding git repo in parent
         mock_repo_instance = Mock()
         mock_repo.return_value = mock_repo_instance
@@ -319,3 +317,108 @@ def test_pytest_integration():
     assert hasattr(plugin, "pytest_addoption")
     assert hasattr(plugin, "pytest_configure")
     assert hasattr(plugin, "DeltaPlugin")
+
+
+class TestVisualization:
+    """Test cases for visualization functionality."""
+
+    def test_visualize_dependency_graph_empty(self):
+        """Test visualization with empty dependency graph."""
+        analyzer = DependencyAnalyzer(Path("/tmp"))
+        
+        result = analyzer.visualize_dependency_graph({})
+        
+        assert "No dependencies found." in result
+
+    def test_visualize_dependency_graph_with_dependencies(self):
+        """Test visualization with actual dependencies."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # Create test files
+            file_a = temp_path / "file_a.py"
+            file_b = temp_path / "file_b.py"
+            file_c = temp_path / "file_c.py"
+            
+            # Create dependency graph: A -> B, B -> C, C -> nothing
+            dependency_graph = {
+                file_a: {file_b},
+                file_b: {file_c},
+                file_c: set(),
+            }
+            
+            analyzer = DependencyAnalyzer(temp_path)
+            result = analyzer.visualize_dependency_graph(dependency_graph)
+            
+            # Check that output contains expected elements
+            assert "Project Dependency Graph" in result
+            assert "file_a.py:" in result
+            assert "file_b.py:" in result  
+            assert "file_c.py:" in result
+            assert "(no dependencies)" in result
+            assert "Summary" in result
+            assert "Total files: 3" in result
+            assert "Total dependencies: 2" in result
+
+    @patch("pytest_delta.plugin.Repo")
+    def test_plugin_visualization_only_mode(self, mock_repo):
+        """Test plugin in visualization-only mode."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": True,
+            "--delta": False,
+        }.get(opt, False)
+
+        plugin = DeltaPlugin(config)
+        plugin.dependency_analyzer = Mock()
+        plugin.dependency_analyzer.build_dependency_graph.return_value = {}
+        plugin.dependency_analyzer.visualize_dependency_graph.return_value = "Test visualization"
+
+        items = [Mock(), Mock()]  # Mock test items
+        
+        # Call the method
+        plugin.pytest_collection_modifyitems(config, items)
+        
+        # Should clear all items when only visualization is requested
+        assert len(items) == 0
+        plugin.dependency_analyzer.build_dependency_graph.assert_called_once()
+        plugin.dependency_analyzer.visualize_dependency_graph.assert_called_once()
+
+    @patch("pytest_delta.plugin.Repo") 
+    def test_plugin_combined_delta_and_visualization(self, mock_repo):
+        """Test plugin with both --delta and --delta-vis."""
+        # Mock git repo
+        mock_repo_instance = Mock()
+        mock_repo.return_value = mock_repo_instance
+
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": True,
+            "--delta": True,
+        }.get(opt, False)
+
+        plugin = DeltaPlugin(config)
+        plugin.dependency_analyzer = Mock()
+        plugin.dependency_analyzer.build_dependency_graph.return_value = {}
+        plugin.dependency_analyzer.visualize_dependency_graph.return_value = "Test visualization"
+        plugin.delta_file = Path("/tmp/test.delta.json")
+
+        items = [Mock(), Mock()]  # Mock test items
+        original_len = len(items)
+        
+        # Call the method - since delta file doesn't exist, should run all tests
+        plugin.pytest_collection_modifyitems(config, items)
+        
+        # Should NOT clear items when both flags are used
+        assert len(items) == original_len
+        plugin.dependency_analyzer.build_dependency_graph.assert_called_once()
+        plugin.dependency_analyzer.visualize_dependency_graph.assert_called_once()
+        assert plugin.should_run_all is True  # Because delta file doesn't exist
