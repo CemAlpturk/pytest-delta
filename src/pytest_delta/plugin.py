@@ -73,6 +73,7 @@ class DeltaPlugin:
         self.delta_file = Path(delta_dir) / delta_filename
         self.force_regenerate = config.getoption("--delta-force")
         self.ignore_patterns = config.getoption("--delta-ignore")
+        self.visualize = config.getoption("--delta-vis")
         self.root_dir = Path.cwd()
         self.delta_manager = DeltaManager(self.delta_file)
         self.dependency_analyzer = DependencyAnalyzer(
@@ -86,6 +87,14 @@ class DeltaPlugin:
     ) -> None:
         """Modify the collected test items to only include affected tests."""
         try:
+            # Handle visualization mode first  
+            if self.visualize:
+                self._handle_visualization()
+                # If only visualization is requested (without --delta), don't run tests
+                if not config.getoption("--delta"):
+                    items.clear()
+                    return
+            
             # Try to determine which files are affected
             self._analyze_changes()
 
@@ -176,6 +185,24 @@ class DeltaPlugin:
         except Exception as e:
             self._print_warning(f"Error analyzing changes: {e}")
             self.should_run_all = True
+
+    def _handle_visualization(self) -> None:
+        """Handle visualization of the dependency graph."""
+        self._print_info("Building dependency graph for visualization...")
+        
+        try:
+            # Build dependency graph
+            dependency_graph = self.dependency_analyzer.build_dependency_graph()
+            
+            # Generate visualization
+            visualization = self.dependency_analyzer.visualize_dependency_graph(dependency_graph)
+            
+            # Print the visualization
+            print("\n" + visualization)
+            
+        except Exception as e:
+            self._print_warning(f"Error generating visualization: {e}")
+            raise
 
     def _get_changed_files(self, repo: Repo, last_commit: str) -> Set[Path]:
         """Get list of files changed since the last commit."""

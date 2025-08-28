@@ -48,6 +48,7 @@ On first run, it will execute all tests and create a `.delta.json` file with met
 - `--delta-dir PATH`: Specify directory for delta metadata file (default: current directory)
 - `--delta-force`: Force regeneration of delta file and run all tests
 - `--delta-ignore PATTERN`: Ignore file patterns during dependency analysis (can be used multiple times)
+- `--delta-vis`: Visualize the project dependency graph (use alone or with --delta)
 
 ### Examples
 
@@ -78,7 +79,48 @@ pytest --delta --delta-ignore "*generated*" --delta-ignore "vendor/*"
 
 # Ignore test files from dependency analysis (useful for complex test hierarchies)
 pytest --delta --delta-ignore "tests/integration/*"
+
+# Visualize project dependency graph only
+pytest --delta-vis
+
+# Visualize dependency graph and run delta tests
+pytest --delta --delta-vis
 ```
+
+### Project Dependency Visualization
+
+The `--delta-vis` option provides a text-based visualization of your project's dependency graph based on Python imports. This feature is useful for:
+
+- **Understanding project structure**: See how your modules depend on each other
+- **Debugging the plugin**: Verify that the dependency analysis is working correctly  
+- **Code review**: Identify potential circular dependencies or overly complex relationships
+
+**Example output:**
+```
+Project Dependency Graph
+=========================
+
+src/mypackage/__init__.py:
+    └── (no dependencies)
+
+src/mypackage/main.py:
+    ├── src/mypackage/__init__.py
+    └── src/mypackage/utils.py
+
+tests/test_main.py:
+    ├── src/mypackage/main.py
+    └── src/mypackage/utils.py
+
+Summary
+-------
+Total files: 4
+Total dependencies: 4
+Average dependencies per file: 1.0
+```
+
+**Usage modes:**
+- `pytest --delta-vis`: Show visualization only (no tests run)
+- `pytest --delta --delta-vis`: Show visualization, then run delta tests
 
 ### Migration from Previous Versions
 

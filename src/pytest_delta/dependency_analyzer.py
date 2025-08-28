@@ -286,22 +286,29 @@ class DependencyAnalyzer:
 
         lines = ["Project Dependency Graph", "=" * 25, ""]
         
-        # Sort files for consistent output
-        sorted_files = sorted(dependency_graph.keys(), key=lambda p: str(p.relative_to(self.root_dir)))
+        # Sort files for consistent output with safe relative path calculation
+        def safe_relative_path(p: Path) -> str:
+            try:
+                return str(p.relative_to(self.root_dir))
+            except ValueError:
+                # If relative_to fails, use absolute path
+                return str(p)
+        
+        sorted_files = sorted(dependency_graph.keys(), key=lambda p: safe_relative_path(p))
         
         for file_path in sorted_files:
             dependencies = dependency_graph[file_path]
-            relative_path = file_path.relative_to(self.root_dir)
+            relative_path_str = safe_relative_path(file_path)
             
-            lines.append(f"{relative_path}:")
+            lines.append(f"{relative_path_str}:")
             
             if dependencies:
                 # Sort dependencies for consistent output
-                sorted_deps = sorted(dependencies, key=lambda p: str(p.relative_to(self.root_dir)))
+                sorted_deps = sorted(dependencies, key=lambda p: safe_relative_path(p))
                 for i, dep in enumerate(sorted_deps):
-                    dep_relative = dep.relative_to(self.root_dir)
+                    dep_relative_str = safe_relative_path(dep)
                     prefix = "├── " if i < len(sorted_deps) - 1 else "└── "
-                    lines.append(f"    {prefix}{dep_relative}")
+                    lines.append(f"    {prefix}{dep_relative_str}")
             else:
                 lines.append("    └── (no dependencies)")
             
