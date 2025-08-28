@@ -14,6 +14,7 @@ from git.exc import GitCommandError, InvalidGitRepositoryError
 
 from .dependency_analyzer import DependencyAnalyzer
 from .delta_manager import DeltaManager
+from .visualizer import DependencyVisualizer
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -49,11 +50,17 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=[],
         help="Ignore file patterns during dependency analysis (can be used multiple times)",
     )
+    group.addoption(
+        "--delta-vis",
+        action="store_true",
+        default=False,
+        help="Generate a visual representation of the project's dependency graph",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure the plugin if --delta flag is used."""
-    if config.getoption("--delta"):
+    if config.getoption("--delta") or config.getoption("--delta-vis"):
         config.pluginmanager.register(DeltaPlugin(config), "delta-plugin")
 
 
@@ -73,11 +80,13 @@ class DeltaPlugin:
         self.delta_file = Path(delta_dir) / delta_filename
         self.force_regenerate = config.getoption("--delta-force")
         self.ignore_patterns = config.getoption("--delta-ignore")
+        self.enable_visualization = config.getoption("--delta-vis")
         self.root_dir = Path.cwd()
         self.delta_manager = DeltaManager(self.delta_file)
         self.dependency_analyzer = DependencyAnalyzer(
             self.root_dir, ignore_patterns=self.ignore_patterns
         )
+        self.visualizer = DependencyVisualizer(self.root_dir)
         self.affected_files: Set[Path] = set()
         self.should_run_all = False
 
@@ -86,6 +95,14 @@ class DeltaPlugin:
     ) -> None:
         """Modify the collected test items to only include affected tests."""
         try:
+            # Generate visualization if requested
+            if self.enable_visualization:
+                self._generate_visualization()
+
+            # Only proceed with delta analysis if --delta is enabled
+            if not config.getoption("--delta"):
+                return
+
             # Try to determine which files are affected
             self._analyze_changes()
 
@@ -111,8 +128,7 @@ class DeltaPlugin:
 
             if filtered_count > 0:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir))
-                    for f in sorted(self.affected_files)
+                    str(f.relative_to(self.root_dir)) for f in sorted(self.affected_files)
                 )
                 self._print_info(f"Affected files: {affected_files_str}")
 
@@ -303,6 +319,31 @@ class DeltaPlugin:
                     return False
 
         return False
+
+    def _generate_visualization(self) -> None:
+        """Generate dependency graph visualization."""
+        try:
+            self._print_info("Generating dependency graph visualization...")
+
+            # Build the dependency graph
+            dependency_graph = self.dependency_analyzer.build_dependency_graph()
+
+            # Generate console output for immediate feedback
+            console_output = self.visualizer.generate_console_output(dependency_graph)
+            print("\n" + console_output)
+
+            # Save DOT format file
+            dot_file = self.visualizer.save_visualization(dependency_graph, format="dot")
+            self._print_info(f"DOT format saved to: {dot_file}")
+
+            # Save text summary
+            txt_file = self.visualizer.save_visualization(dependency_graph, format="txt")
+            self._print_info(f"Text summary saved to: {txt_file}")
+
+            self._print_info("Visualization complete!")
+
+        except Exception as e:
+            self._print_warning(f"Failed to generate visualization: {e}")
 
     def _print_info(self, message: str) -> None:
         """Print informational message."""

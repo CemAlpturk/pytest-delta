@@ -53,22 +53,22 @@ class TestDeltaManager:
 
             with pytest.raises(ValueError, match="Failed to load delta metadata"):
                 manager.load_metadata()
-    
+
     @patch("pytest_delta.delta_manager.Repo")
     def test_update_metadata_parent_git_search(self, mock_repo):
         """Test that update_metadata uses search_parent_directories=True."""
         with tempfile.TemporaryDirectory() as temp_dir:
             delta_file = Path(temp_dir) / ".delta.json"
             manager = DeltaManager(delta_file)
-            
+
             # Mock successful repo with commit
             mock_repo_instance = Mock()
             mock_repo_instance.head.commit.hexsha = "abc123"
             mock_repo.return_value = mock_repo_instance
-            
+
             root_dir = Path(temp_dir)
             manager.update_metadata(root_dir)
-            
+
             # Verify that Repo was called with search_parent_directories=True
             mock_repo.assert_called_once_with(root_dir, search_parent_directories=True)
 
@@ -261,12 +261,11 @@ class TestDeltaPlugin:
     @patch("pytest_delta.plugin.Repo")
     def test_non_root_git_repo_detection(self, mock_repo):
         """Test that git repository is detected even when .git is in parent directory."""
-        from git import Repo
-        
+
         # Mock successful Repo creation to simulate finding git repo in parent
         mock_repo_instance = Mock()
         mock_repo.return_value = mock_repo_instance
-        
+
         config = Mock()
         config.getoption.side_effect = lambda opt: {
             "--delta-filename": ".delta",
@@ -276,10 +275,10 @@ class TestDeltaPlugin:
 
         plugin = DeltaPlugin(config)
         plugin._analyze_changes()
-        
+
         # Verify that Repo was called with search_parent_directories=True
         mock_repo.assert_called_with(plugin.root_dir, search_parent_directories=True)
-        
+
         # Should not run all tests if git repo is found (but delta file doesn't exist)
         # In this case should_run_all will be True because delta file doesn't exist
         # but the important thing is that no InvalidGitRepositoryError was raised
@@ -319,3 +318,149 @@ def test_pytest_integration():
     assert hasattr(plugin, "pytest_addoption")
     assert hasattr(plugin, "pytest_configure")
     assert hasattr(plugin, "DeltaPlugin")
+
+
+class TestDependencyVisualizer:
+    """Test cases for DependencyVisualizer."""
+
+    def test_generate_dot_format(self):
+        """Test generating DOT format representation."""
+        from pytest_delta.visualizer import DependencyVisualizer
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test files
+            file_a = temp_path / "module_a.py"
+            file_b = temp_path / "module_b.py"
+            file_c = temp_path / "module_c.py"
+
+            # Create dependency graph: A -> B, B -> C
+            dependency_graph = {
+                file_a: {file_b},
+                file_b: {file_c},
+                file_c: set(),
+            }
+
+            visualizer = DependencyVisualizer(temp_path)
+            dot_content = visualizer.generate_dot_format(dependency_graph)
+
+            # Verify DOT format structure
+            assert "digraph dependencies {" in dot_content
+            assert "node_" in dot_content
+            assert "->" in dot_content
+            assert "}" in dot_content
+            assert "module_a.py" in dot_content
+            assert "module_b.py" in dot_content
+            assert "module_c.py" in dot_content
+
+    def test_generate_text_summary(self):
+        """Test generating text summary."""
+        from pytest_delta.visualizer import DependencyVisualizer
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test files
+            file_a = temp_path / "module_a.py"
+            file_b = temp_path / "module_b.py"
+
+            # Create dependency graph
+            dependency_graph = {
+                file_a: {file_b},
+                file_b: set(),
+            }
+
+            visualizer = DependencyVisualizer(temp_path)
+            summary = visualizer.generate_text_summary(dependency_graph)
+
+            # Verify text summary structure
+            assert "Dependency Graph Summary" in summary
+            assert "Total files: 2" in summary
+            assert "Total dependencies: 1" in summary
+            assert "module_a.py" in summary
+            assert "module_b.py" in summary
+
+    def test_save_visualization(self):
+        """Test saving visualization files."""
+        from pytest_delta.visualizer import DependencyVisualizer
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test files
+            file_a = temp_path / "module_a.py"
+
+            # Create simple dependency graph
+            dependency_graph = {
+                file_a: set(),
+            }
+
+            visualizer = DependencyVisualizer(temp_path)
+
+            # Test DOT format save
+            dot_file = visualizer.save_visualization(dependency_graph, format="dot")
+            assert dot_file.exists()
+            assert dot_file.suffix == ".dot"
+
+            # Test text format save
+            txt_file = visualizer.save_visualization(dependency_graph, format="txt")
+            assert txt_file.exists()
+            assert txt_file.suffix == ".txt"
+
+    def test_generate_console_output(self):
+        """Test generating console output."""
+        from pytest_delta.visualizer import DependencyVisualizer
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test files
+            file_a = temp_path / "module_a.py"
+
+            # Create dependency graph
+            dependency_graph = {
+                file_a: set(),
+            }
+
+            visualizer = DependencyVisualizer(temp_path)
+            console_output = visualizer.generate_console_output(dependency_graph)
+
+            # Verify console output structure
+            assert "📊 Dependency Graph Visualization" in console_output
+            assert "Files: 1" in console_output
+            assert "Dependencies: 0" in console_output
+
+
+class TestDeltaPluginVisualization:
+    """Test cases for DeltaPlugin visualization functionality."""
+
+    @patch("pytest_delta.plugin.Repo")
+    def test_visualization_option_enabled(self, mock_repo):
+        """Test plugin initialization with visualization enabled."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": True,
+        }.get(opt, False)
+
+        plugin = DeltaPlugin(config)
+        assert plugin.enable_visualization is True
+
+    @patch("pytest_delta.plugin.Repo")
+    def test_visualization_option_disabled(self, mock_repo):
+        """Test plugin initialization with visualization disabled."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+        }.get(opt, False)
+
+        plugin = DeltaPlugin(config)
+        assert plugin.enable_visualization is False

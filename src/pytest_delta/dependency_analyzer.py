@@ -175,9 +175,7 @@ class DependencyAnalyzer:
 
         return dependencies
 
-    def _resolve_import_to_file(
-        self, import_name: str, all_files: Set[Path]
-    ) -> Path | None:
+    def _resolve_import_to_file(self, import_name: str, all_files: Set[Path]) -> Path | None:
         """Resolve an import name to an actual file path."""
         # Convert module name to potential file paths
         parts = import_name.split(".")
