@@ -81,13 +81,14 @@ class DeltaPlugin:
         self.force_regenerate = config.getoption("--delta-force")
         self.ignore_patterns = config.getoption("--delta-ignore")
         self.enable_visualization = config.getoption("--delta-vis")
-        self.root_dir = Path.cwd()
+        self.root_dir = Path.cwd().resolve()
         self.delta_manager = DeltaManager(self.delta_file)
         self.dependency_analyzer = DependencyAnalyzer(
             self.root_dir, ignore_patterns=self.ignore_patterns
         )
         self.visualizer = DependencyVisualizer(self.root_dir)
         self.affected_files: Set[Path] = set()
+        self.changed_test_files: Set[Path] = set()
         self.should_run_all = False
 
     def pytest_collection_modifyitems(
@@ -183,11 +184,22 @@ class DeltaPlugin:
                 # No changes detected
                 return
 
-            # Build dependency graph and find affected files
+            # Separate source files from test files in the changed files
+            source_files = self.dependency_analyzer._find_source_files()
+            test_files = self.dependency_analyzer._find_test_files()
+
+            changed_source_files = {f for f in changed_files if f in source_files}
+            changed_test_files = {f for f in changed_files if f in test_files}
+
+            # Build dependency graph only for source files and find affected source files
             dependency_graph = self.dependency_analyzer.build_dependency_graph()
-            self.affected_files = self.dependency_analyzer.find_affected_files(
-                changed_files, dependency_graph
+            affected_source_files = self.dependency_analyzer.find_affected_files(
+                changed_source_files, dependency_graph
             )
+
+            # Combine affected source files with directly changed test files
+            self.affected_files = affected_source_files
+            self.changed_test_files = changed_test_files
 
         except Exception as e:
             self._print_warning(f"Error analyzing changes: {e}")
@@ -250,7 +262,12 @@ class DeltaPlugin:
         for item in items:
             test_file = Path(item.fspath)
 
-            # Check if the test file itself is affected
+            # Check if the test file itself was changed directly
+            if test_file in self.changed_test_files:
+                affected_tests.append(item)
+                continue
+
+            # Check if the test file is affected by source file changes
             if test_file in self.affected_files:
                 affected_tests.append(item)
                 continue
