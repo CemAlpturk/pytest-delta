@@ -22,6 +22,6 @@ def test_divide():
     """Test division function."""
     assert divide(10, 2) == 5
     assert divide(1, 3) == pytest.approx(0.3333333)
-    
+
     with pytest.raises(ValueError):
         divide(5, 0)
