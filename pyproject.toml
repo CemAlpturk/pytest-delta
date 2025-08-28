@@ -18,14 +18,7 @@ classifiers = [
 [tool.poetry.dependencies]
 python = ">=3.12"
 pytest = ">=7.0"
-
-[tool.poetry.group.dev.dependencies]
-mypy = "*"
-ruff = "*"
-pytest = "*"
-pytest-cov = "*"
-pre-commit = "*"
-types-setuptools = "*"
+gitpython = ">=3.1.0"
 
 [tool.poetry.plugins."pytest11"]
 pytest-delta = "pytest_delta.plugin"
