@@ -95,8 +95,15 @@ class DependencyAnalyzer:
 
         # Filter out __pycache__, .venv, and other irrelevant files
         filtered_files = set()
-        exclude_patterns = ["__pycache__", ".venv", "venv", ".git", "node_modules", ".pytest_cache"]
-        
+        exclude_patterns = [
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".git",
+            "node_modules",
+            ".pytest_cache",
+        ]
+
         for file_path in python_files:
             path_str = str(file_path)
             # Skip if any exclude pattern is in the path
