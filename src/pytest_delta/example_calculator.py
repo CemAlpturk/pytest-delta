@@ -3,6 +3,7 @@
 
 def add(a: float, b: float) -> float:
     """Add two numbers."""
+    # Added a comment to test change detection
     return a + b
 
 
