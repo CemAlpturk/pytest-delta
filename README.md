@@ -10,6 +10,7 @@ pytest-delta is a pytest plugin that reduces test execution time by running only
 
 - **Smart Test Selection**: Only runs tests affected by changed files
 - **Dependency Tracking**: Creates a dependency graph based on Python imports
+- **Dependency Visualization**: Generate visual representations of project structure
 - **Git Integration**: Compares against the last successful test run commit
 - **Uncommitted Changes Support**: Includes both staged and unstaged changes
 - **Force Regeneration**: Option to force running all tests and regenerate metadata
@@ -48,12 +49,19 @@ On first run, it will execute all tests and create a `.delta.json` file with met
 - `--delta-dir PATH`: Specify directory for delta metadata file (default: current directory)
 - `--delta-force`: Force regeneration of delta file and run all tests
 - `--delta-ignore PATTERN`: Ignore file patterns during dependency analysis (can be used multiple times)
+- `--delta-vis`: Generate a visual representation of the project's dependency graph
 
 ### Examples
 
 ```bash
 # Run only affected tests
 pytest --delta
+
+# Generate dependency visualization
+pytest --delta-vis
+
+# Combine visualization with delta testing
+pytest --delta --delta-vis
 
 # Force run all tests and regenerate metadata
 pytest --delta --delta-force
@@ -78,6 +86,69 @@ pytest --delta --delta-ignore "*generated*" --delta-ignore "vendor/*"
 
 # Ignore test files from dependency analysis (useful for complex test hierarchies)
 pytest --delta --delta-ignore "tests/integration/*"
+```
+
+## Dependency Visualization
+
+The `--delta-vis` option generates visual representations of your project's dependency graph, which is useful for:
+
+- **Understanding code relationships**: See which files depend on each other
+- **Debugging the plugin**: Visualize how pytest-delta determines affected tests  
+- **Code review**: Get insights into project structure and coupling
+- **Documentation**: Generate dependency diagrams for your project
+
+### Visualization Output
+
+When you run `pytest --delta-vis`, the plugin generates:
+
+1. **Console output**: Immediate feedback showing file counts and top dependencies
+2. **DOT file** (`dependency_graph.dot`): GraphViz format for rendering images
+3. **Text summary** (`dependency_summary.txt`): Detailed human-readable analysis
+
+### Example Console Output
+
+```
+📊 Dependency Graph Visualization
+==================================================
+Files: 7 | Dependencies: 5 | Max per file: 5
+
+🔗 Files with most dependencies:
+   5 deps: tests/test_plugin.py
+   0 deps: src/myproject/utils.py
+   0 deps: src/myproject/models.py
+```
+
+### Rendering Graphical Output
+
+If you have Graphviz installed, you can render the DOT file as an image:
+
+```bash
+# Generate visualization
+pytest --delta-vis
+
+# Render as PNG image (requires graphviz)
+dot -Tpng dependency_graph.dot -o dependency_graph.png
+
+# Render as SVG (scalable)  
+dot -Tsvg dependency_graph.dot -o dependency_graph.svg
+
+# Render as PDF
+dot -Tpdf dependency_graph.dot -o dependency_graph.pdf
+```
+
+### Installation of Optional Dependencies
+
+For rendering graphical outputs, you can install Graphviz:
+
+```bash
+# On Ubuntu/Debian
+sudo apt-get install graphviz
+
+# On macOS  
+brew install graphviz
+
+# On Windows (using chocolatey)
+choco install graphviz
 ```
 
 ### Migration from Previous Versions

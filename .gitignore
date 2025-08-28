@@ -25,3 +25,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 .delta.json
+
+# Generated visualization files
+dependency_graph.dot
+dependency_summary.txt
