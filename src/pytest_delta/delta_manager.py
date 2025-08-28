@@ -44,7 +44,7 @@ class DeltaManager:
     def update_metadata(self, root_dir: Path) -> None:
         """Update metadata with current git state."""
         try:
-            repo = Repo(root_dir)
+            repo = Repo(root_dir, search_parent_directories=True)
         except InvalidGitRepositoryError as e:
             raise ValueError("Not a Git repository") from e
 

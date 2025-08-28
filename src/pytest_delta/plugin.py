@@ -133,7 +133,7 @@ class DeltaPlugin:
     def _analyze_changes(self) -> None:
         """Analyze what files have changed and determine affected files."""
         try:
-            repo = Repo(self.root_dir)
+            repo = Repo(self.root_dir, search_parent_directories=True)
         except InvalidGitRepositoryError:
             self._print_warning("Not a Git repository, running all tests")
             self.should_run_all = True
