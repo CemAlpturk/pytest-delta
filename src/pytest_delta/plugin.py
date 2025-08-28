@@ -43,6 +43,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Force regeneration of the delta file and run all tests",
     )
+    group.addoption(
+        "--delta-ignore",
+        action="append",
+        default=[],
+        help="Ignore file patterns during dependency analysis (can be used multiple times)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -66,9 +72,12 @@ class DeltaPlugin:
 
         self.delta_file = Path(delta_dir) / delta_filename
         self.force_regenerate = config.getoption("--delta-force")
+        self.ignore_patterns = config.getoption("--delta-ignore")
         self.root_dir = Path.cwd()
         self.delta_manager = DeltaManager(self.delta_file)
-        self.dependency_analyzer = DependencyAnalyzer(self.root_dir)
+        self.dependency_analyzer = DependencyAnalyzer(
+            self.root_dir, ignore_patterns=self.ignore_patterns
+        )
         self.affected_files: Set[Path] = set()
         self.should_run_all = False
 

@@ -47,6 +47,7 @@ On first run, it will execute all tests and create a `.delta.json` file with met
 - `--delta-filename NAME`: Specify filename for delta metadata file (default: `.delta`, `.json` extension added automatically)
 - `--delta-dir PATH`: Specify directory for delta metadata file (default: current directory)
 - `--delta-force`: Force regeneration of delta file and run all tests
+- `--delta-ignore PATTERN`: Ignore file patterns during dependency analysis (can be used multiple times)
 
 ### Examples
 
@@ -68,6 +69,15 @@ pytest --delta --delta-filename my-tests --delta-dir /tmp/deltas
 
 # Combine with other pytest options
 pytest --delta -v --tb=short
+
+# Ignore generated files during analysis
+pytest --delta --delta-ignore "*generated*"
+
+# Ignore multiple patterns
+pytest --delta --delta-ignore "*generated*" --delta-ignore "vendor/*"
+
+# Ignore test files from dependency analysis (useful for complex test hierarchies)
+pytest --delta --delta-ignore "tests/integration/*"
 ```
 
 ### Migration from Previous Versions
@@ -120,6 +130,34 @@ project/
 ```
 
 ## Configuration
+
+### Ignoring Files
+
+The `--delta-ignore` option allows you to exclude certain files from dependency analysis. This is useful for:
+
+- **Generated files**: Auto-generated code that shouldn't trigger test runs
+- **Vendor/third-party code**: External dependencies that don't need analysis
+- **Temporary files**: Files that are frequently modified but don't affect tests
+- **Documentation**: Markdown, text files that might be mixed with Python code
+
+The ignore patterns support:
+- **Glob patterns**: `*generated*`, `*.tmp`, `vendor/*`
+- **Path matching**: Both relative and absolute paths are checked
+- **Multiple patterns**: Use the option multiple times for different patterns
+
+Examples:
+```bash
+# Ignore all generated files
+pytest --delta --delta-ignore "*generated*"
+
+# Ignore vendor directory and any temp files
+pytest --delta --delta-ignore "vendor/*" --delta-ignore "*.tmp"
+
+# Ignore specific test subdirectories from analysis
+pytest --delta --delta-ignore "tests/integration/*" --delta-ignore "tests/e2e/*"
+```
+
+### Default Configuration
 
 The plugin requires no configuration for basic usage. It automatically:
 

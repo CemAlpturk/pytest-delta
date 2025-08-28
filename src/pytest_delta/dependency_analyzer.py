@@ -6,15 +6,17 @@ and determines which files are affected by changes.
 """
 
 import ast
+import fnmatch
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, List, Set
 
 
 class DependencyAnalyzer:
     """Analyzes Python file dependencies based on imports."""
 
-    def __init__(self, root_dir: Path):
+    def __init__(self, root_dir: Path, ignore_patterns: List[str] | None = None):
         self.root_dir = root_dir
+        self.ignore_patterns = ignore_patterns or []
 
     def build_dependency_graph(self) -> Dict[Path, Set[Path]]:
         """
@@ -106,9 +108,16 @@ class DependencyAnalyzer:
 
         for file_path in python_files:
             path_str = str(file_path)
+            relative_path_str = str(file_path.relative_to(self.root_dir))
+
             # Skip if any exclude pattern is in the path
             if any(pattern in path_str for pattern in exclude_patterns):
                 continue
+
+            # Skip if matches any user-provided ignore patterns
+            if self._should_ignore_file(file_path, relative_path_str):
+                continue
+
             if file_path.is_file():
                 filtered_files.add(file_path.resolve())
 
@@ -241,3 +250,23 @@ class DependencyAnalyzer:
                 reverse_deps[dependency].add(file_path)
 
         return reverse_deps
+
+    def _should_ignore_file(self, file_path: Path, relative_path_str: str) -> bool:
+        """Check if a file should be ignored based on user-provided patterns."""
+        if not self.ignore_patterns:
+            return False
+
+        # Check against both absolute path and relative path
+        absolute_path_str = str(file_path)
+
+        for pattern in self.ignore_patterns:
+            # Use fnmatch for glob-style pattern matching
+            if fnmatch.fnmatch(relative_path_str, pattern):
+                return True
+            if fnmatch.fnmatch(absolute_path_str, pattern):
+                return True
+            # Also check if pattern is simply contained in the path
+            if pattern in relative_path_str or pattern in absolute_path_str:
+                return True
+
+        return False

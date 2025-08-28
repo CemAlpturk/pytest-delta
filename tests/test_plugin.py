@@ -128,6 +128,54 @@ class TestDependencyAnalyzer:
 
             assert affected == {module_a, module_b, module_c}
 
+    def test_ignore_patterns(self):
+        """Test ignoring files based on patterns."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            (src_dir / "module1.py").touch()
+            (src_dir / "module2.py").touch()
+            (src_dir / "generated.py").touch()
+
+            vendor_dir = temp_path / "vendor"
+            vendor_dir.mkdir()
+            (vendor_dir / "external.py").touch()
+
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+            (tests_dir / "test_module1.py").touch()
+
+            # Test with ignore patterns
+            ignore_patterns = ["*generated*", "vendor/*", "*/test_*"]
+            analyzer = DependencyAnalyzer(temp_path, ignore_patterns=ignore_patterns)
+            python_files = analyzer._find_python_files()
+
+            # Should only find module1.py and module2.py (ignoring generated.py, vendor/external.py, and test files)
+            file_names = {f.name for f in python_files}
+            assert file_names == {"module1.py", "module2.py"}
+
+    def test_ignore_patterns_empty(self):
+        """Test that no patterns means no ignoring."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            (src_dir / "module1.py").touch()
+            (src_dir / "generated.py").touch()
+
+            # Test with no ignore patterns
+            analyzer = DependencyAnalyzer(temp_path, ignore_patterns=[])
+            python_files = analyzer._find_python_files()
+
+            # Should find both files
+            file_names = {f.name for f in python_files}
+            assert file_names == {"module1.py", "generated.py"}
+
 
 class TestDeltaPlugin:
     """Test cases for DeltaPlugin main functionality."""
