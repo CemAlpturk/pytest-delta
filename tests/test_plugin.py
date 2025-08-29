@@ -98,6 +98,103 @@ class TestDependencyAnalyzer:
             file_names = {f.name for f in python_files}
             assert file_names == {"module1.py", "module2.py", "test_module1.py"}
 
+    def test_find_source_files_excludes_test_files(self):
+        """Test finding source files excludes test files."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            (src_dir / "module1.py").touch()
+            (src_dir / "module2.py").touch()
+
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+            (tests_dir / "test_module1.py").touch()
+
+            analyzer = DependencyAnalyzer(temp_path)
+            source_files = analyzer._find_source_files()
+
+            assert len(source_files) == 2
+            file_names = {f.name for f in source_files}
+            assert file_names == {"module1.py", "module2.py"}
+
+    def test_find_test_files(self):
+        """Test finding test files only."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir).resolve()
+
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            (src_dir / "module1.py").touch()
+            (src_dir / "module2.py").touch()
+
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+            (tests_dir / "test_module1.py").touch()
+            (tests_dir / "__init__.py").touch()
+
+            analyzer = DependencyAnalyzer(temp_path)
+            test_files = analyzer._find_test_files()
+
+            assert len(test_files) == 2
+            file_names = {f.name for f in test_files}
+            assert file_names == {"test_module1.py", "__init__.py"}
+
+    def test_build_dependency_graph_excludes_test_files(self):
+        """Test that dependency graph only includes source files."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+
+            module_a = src_dir / "module_a.py"
+            module_b = src_dir / "module_b.py"
+            module_a.write_text("import src.module_b\n")
+            module_b.write_text("# Empty module\n")
+
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+            test_file = tests_dir / "test_module_a.py"
+            test_file.write_text("import src.module_a\n")
+
+            analyzer = DependencyAnalyzer(temp_path)
+            dependency_graph = analyzer.build_dependency_graph()
+
+            # Only source files should be in the graph
+            graph_file_names = {f.name for f in dependency_graph.keys()}
+            assert graph_file_names == {"module_a.py", "module_b.py"}
+
+            # Test file should not be in the dependency graph
+            assert test_file.resolve() not in dependency_graph
+
+    def test_is_test_file_detection(self):
+        """Test test file detection logic."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            analyzer = DependencyAnalyzer(temp_path)
+
+            # Test various file patterns
+            test_cases = [
+                ("tests/test_module.py", True),
+                ("tests/__init__.py", True),
+                ("src/test_helper.py", True),  # Starts with test_
+                ("src/helper_test.py", True),  # Ends with _test.py
+                ("src/module.py", False),
+                ("other/module.py", False),
+            ]
+
+            for file_path_str, expected in test_cases:
+                file_path = temp_path / file_path_str
+                is_test = analyzer._is_test_file(file_path, file_path_str)
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -308,6 +405,105 @@ class TestDeltaPlugin:
             # Test non-matching paths
             other_file = temp_path / "src" / "other.py"
             assert plugin._paths_match(test_file, other_file) is False
+
+    def test_separate_test_and_source_file_changes(self):
+        """Test that test file changes and source file changes are handled separately."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+        }.get(opt, [])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir).resolve()
+
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            module_a = src_dir / "module_a.py"
+            module_b = src_dir / "module_b.py"
+            module_a.write_text("import src.module_b\n")
+            module_b.write_text("# Empty module\n")
+
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+            test_a = tests_dir / "test_module_a.py"
+            test_a.write_text("from src.module_a import *\n")
+
+            plugin = DeltaPlugin(config)
+            plugin.root_dir = temp_path
+            # Update the analyzer's root_dir to match
+            plugin.dependency_analyzer.root_dir = temp_path
+
+            # Simulate changes to both source and test files
+            changed_files = {module_a.resolve(), test_a.resolve()}
+
+            # Get file classifications using the analyzer instance from plugin
+            source_files = plugin.dependency_analyzer._find_source_files()
+            test_files = plugin.dependency_analyzer._find_test_files()
+
+            changed_source_files = {f for f in changed_files if f in source_files}
+            changed_test_files = {f for f in changed_files if f in test_files}
+
+            # Verify classifications
+            assert module_a.resolve() in changed_source_files
+            assert test_a.resolve() in changed_test_files
+            assert test_a.resolve() not in changed_source_files
+            assert module_a.resolve() not in changed_test_files
+
+            # Build dependency graph should only include source files
+            dependency_graph = plugin.dependency_analyzer.build_dependency_graph()
+            assert module_a.resolve() in dependency_graph
+            assert module_b.resolve() in dependency_graph
+            assert test_a.resolve() not in dependency_graph
+
+    def test_filter_affected_tests_handles_direct_test_changes(self):
+        """Test that directly changed test files are selected for testing."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+        }.get(opt, [])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir).resolve()
+
+            # Create test structure
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+            test_a = tests_dir / "test_module_a.py"
+            test_b = tests_dir / "test_module_b.py"
+            test_a.touch()
+            test_b.touch()
+
+            plugin = DeltaPlugin(config)
+            plugin.root_dir = temp_path
+            # Update the analyzer's root_dir to match
+            plugin.dependency_analyzer.root_dir = temp_path
+
+            # Simulate that test_a was changed directly
+            plugin.changed_test_files = {test_a}
+            plugin.affected_files = set()  # No source file changes
+
+            # Mock test items
+            test_item_a = Mock()
+            test_item_a.fspath = str(test_a)
+
+            test_item_b = Mock()
+            test_item_b.fspath = str(test_b)
+
+            items = [test_item_a, test_item_b]
+
+            # Filter affected tests
+            affected_tests = plugin._filter_affected_tests(items)
+
+            # Only test_a should be selected (it was directly changed)
+            assert len(affected_tests) == 1
+            assert affected_tests[0] == test_item_a
 
 
 def test_pytest_integration():

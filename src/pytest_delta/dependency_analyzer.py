@@ -22,15 +22,20 @@ class DependencyAnalyzer:
         """
         Build a dependency graph where keys are files and values are sets of files they depend on.
 
+        Only includes source files in the dependency graph, excluding test files.
+
         Returns:
-            A dictionary mapping file paths to their dependencies.
+            A dictionary mapping source file paths to their dependencies.
         """
         dependency_graph = {}
-        python_files = self._find_python_files()
+        source_files = self._find_source_files()
+        all_python_files = self._find_python_files()
 
-        for file_path in python_files:
-            dependencies = self._extract_dependencies(file_path, python_files)
-            dependency_graph[file_path] = dependencies
+        for file_path in source_files:
+            dependencies = self._extract_dependencies(file_path, all_python_files)
+            # Filter dependencies to only include source files
+            source_dependencies = {dep for dep in dependencies if dep in source_files}
+            dependency_graph[file_path] = source_dependencies
 
         return dependency_graph
 
@@ -122,6 +127,89 @@ class DependencyAnalyzer:
                 filtered_files.add(file_path.resolve())
 
         return filtered_files
+
+    def _find_source_files(self) -> Set[Path]:
+        """Find all Python source files in the project, excluding test files."""
+        source_files = set()
+
+        # Search in common Python source directories
+        search_dirs = [
+            self.root_dir / "src",
+        ]
+
+        # Also check for Python files in the root directory (but not recursively)
+        for file_path in self.root_dir.glob("*.py"):
+            if file_path.is_file():
+                source_files.add(file_path.resolve())
+
+        for search_dir in search_dirs:
+            if search_dir.is_dir():
+                source_files.update(search_dir.rglob("*.py"))
+
+        # Filter out __pycache__, .venv, test files and other irrelevant files
+        filtered_files = set()
+        exclude_patterns = [
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".git",
+            "node_modules",
+            ".pytest_cache",
+        ]
+
+        for file_path in source_files:
+            path_str = str(file_path)
+            relative_path_str = str(file_path.relative_to(self.root_dir))
+
+            # Skip if any exclude pattern is in the path
+            if any(pattern in path_str for pattern in exclude_patterns):
+                continue
+
+            # Skip test files - any file with "test" in its path or name
+            if self._is_test_file(file_path, relative_path_str):
+                continue
+
+            # Skip if matches any user-provided ignore patterns
+            if self._should_ignore_file(file_path, relative_path_str):
+                continue
+
+            if file_path.is_file():
+                filtered_files.add(file_path.resolve())
+
+        return filtered_files
+
+    def _find_test_files(self) -> Set[Path]:
+        """Find all Python test files in the project."""
+        test_files = set()
+
+        # Get all python files and filter for test files
+        all_python_files = self._find_python_files()
+        for file_path in all_python_files:
+            try:
+                relative_path_str = str(file_path.relative_to(self.root_dir))
+                if self._is_test_file(file_path, relative_path_str):
+                    test_files.add(file_path)
+            except ValueError:
+                # Skip files that are not under root_dir
+                continue
+
+        return test_files
+
+    def _is_test_file(self, file_path: Path, relative_path_str: str) -> bool:
+        """Determine if a file is a test file."""
+        # Check if file is in tests directory
+        if "tests/" in relative_path_str or relative_path_str.startswith("tests"):
+            return True
+
+        # Check if filename starts with "test_"
+        if file_path.name.startswith("test_"):
+            return True
+
+        # Check if filename ends with "_test.py"
+        if file_path.name.endswith("_test.py"):
+            return True
+
+        return False
 
     def _extract_dependencies(self, file_path: Path, all_files: Set[Path]) -> Set[Path]:
         """Extract dependencies (imports) from a Python file."""
