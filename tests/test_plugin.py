@@ -123,7 +123,7 @@ class TestDependencyAnalyzer:
     def test_find_test_files(self):
         """Test finding test files only."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
+            temp_path = Path(temp_dir).resolve()
 
             # Create test structure
             src_dir = temp_path / "src"
@@ -191,9 +191,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
