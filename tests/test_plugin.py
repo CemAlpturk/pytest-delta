@@ -304,7 +304,7 @@ class TestDependencyAnalyzer:
     def test_build_dependency_graph_includes_test_files(self):
         """Test that dependency graph includes both source and test files with their dependencies."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
+            temp_path = Path(temp_dir).resolve()
 
             # Create test structure
             src_dir = temp_path / "src"
@@ -325,11 +325,15 @@ class TestDependencyAnalyzer:
 
             # Both source and test files should be in the graph
             graph_file_names = {f.name for f in dependency_graph.keys()}
-            assert graph_file_names == {"module_a.py", "module_b.py", "test_module_a.py"}
+            assert graph_file_names == {
+                "module_a.py",
+                "module_b.py",
+                "test_module_a.py",
+            }
 
             # Test file should be in the dependency graph
             assert test_file.resolve() in dependency_graph
-            
+
             # Test file should have dependency on module_a
             test_dependencies = dependency_graph[test_file.resolve()]
             assert module_a.resolve() in test_dependencies
@@ -337,7 +341,7 @@ class TestDependencyAnalyzer:
     def test_test_filtering_uses_import_dependencies(self):
         """Test that test filtering now uses actual import dependencies instead of just name heuristics."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
+            temp_path = Path(temp_dir).resolve()
 
             # Create realistic project structure demonstrating the issue
             src_dir = temp_path / "src"
@@ -348,31 +352,39 @@ class TestDependencyAnalyzer:
             # Source files
             utils_py = src_dir / "utils.py"
             utils_py.write_text("def add(a, b): return a + b")
-            
-            calculator_py = src_dir / "calculator.py"  
-            calculator_py.write_text("from .utils import add\nclass Calculator:\n    def calc(self, a, b):\n        return add(a, b)")
+
+            calculator_py = src_dir / "calculator.py"
+            calculator_py.write_text(
+                "from .utils import add\nclass Calculator:\n    def calc(self, a, b):\n        return add(a, b)"
+            )
 
             # Test files - mix of naming conventions
             test_utils_py = tests_dir / "test_utils.py"  # Follows naming convention
-            test_utils_py.write_text("from src.utils import add\ndef test_add(): assert add(1,2) == 3")
-            
+            test_utils_py.write_text(
+                "from src.utils import add\ndef test_add(): assert add(1,2) == 3"
+            )
+
             # This test file doesn't follow naming conventions but imports both utils and calculator
             integration_test_py = tests_dir / "integration_test.py"
-            integration_test_py.write_text("from src.calculator import Calculator\nfrom src.utils import add\ndef test_integration(): pass")
+            integration_test_py.write_text(
+                "from src.calculator import Calculator\nfrom src.utils import add\ndef test_integration(): pass"
+            )
 
             analyzer = DependencyAnalyzer(temp_path)
             dependency_graph = analyzer.build_dependency_graph()
 
             # Simulate a change to utils.py (the base module)
             changed_files = {utils_py}
-            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+            affected_files = analyzer.find_affected_files(
+                changed_files, dependency_graph
+            )
 
             # All files that import utils.py should be affected
             expected_affected = {
                 utils_py,  # The changed file itself
                 calculator_py,  # Imports utils
-                test_utils_py,  # Imports utils  
-                integration_test_py  # Imports both utils and calculator
+                test_utils_py,  # Imports utils
+                integration_test_py,  # Imports both utils and calculator
             }
 
             assert affected_files == expected_affected, (
@@ -399,9 +411,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -441,14 +453,16 @@ class TestDependencyAnalyzer:
 
             # b.py should depend on a.py
             deps = analyzer._extract_dependencies(module_b, all_files)
-            assert module_a in deps, f"Expected a.py to be a dependency of b.py, but got: {deps}"
+            assert (
+                module_a in deps
+            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
 
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert module_a in dependency_graph[module_b], (
-                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
-            )
+            assert (
+                module_a in dependency_graph[module_b]
+            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -924,7 +938,9 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, test_dirs=["unit_tests", "integration_tests"]
+            )
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -996,8 +1012,6 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
-
-
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
