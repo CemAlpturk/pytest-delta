@@ -30,20 +30,23 @@ class DependencyAnalyzer:
         """
         Build a dependency graph where keys are files and values are sets of files they depend on.
 
-        Only includes source files in the dependency graph, excluding test files.
+        Includes both source files and test files in the dependency graph to enable
+        accurate test selection based on actual imports.
 
         Returns:
-            A dictionary mapping source file paths to their dependencies.
+            A dictionary mapping file paths to their dependencies.
         """
         dependency_graph = {}
         source_files = self._find_source_files()
+        test_files = self._find_test_files()
+        all_files = source_files | test_files
         all_python_files = self._find_python_files()
 
-        for file_path in source_files:
+        for file_path in all_files:
             dependencies = self._extract_dependencies(file_path, all_python_files)
-            # Filter dependencies to only include source files
-            source_dependencies = {dep for dep in dependencies if dep in source_files}
-            dependency_graph[file_path] = source_dependencies
+            # Filter dependencies to only include files in our tracked set (source + test files)
+            tracked_dependencies = {dep for dep in dependencies if dep in all_files}
+            dependency_graph[file_path] = tracked_dependencies
 
         return dependency_graph
 

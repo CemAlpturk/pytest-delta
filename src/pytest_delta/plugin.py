@@ -211,14 +211,17 @@ class DeltaPlugin:
             changed_source_files = {f for f in changed_files if f in source_files}
             changed_test_files = {f for f in changed_files if f in test_files}
 
-            # Build dependency graph only for source files and find affected source files
+            # Build dependency graph including both source and test files
             dependency_graph = self.dependency_analyzer.build_dependency_graph()
-            affected_source_files = self.dependency_analyzer.find_affected_files(
-                changed_source_files, dependency_graph
+            
+            # Find all files affected by the changes (including test files that depend on changed source files)
+            all_changed_files = changed_source_files | changed_test_files
+            affected_files = self.dependency_analyzer.find_affected_files(
+                all_changed_files, dependency_graph
             )
 
-            # Combine affected source files with directly changed test files
-            self.affected_files = affected_source_files
+            # Store affected files and directly changed test files separately for filtering
+            self.affected_files = affected_files
             self.changed_test_files = changed_test_files
 
         except Exception as e:
@@ -287,81 +290,11 @@ class DeltaPlugin:
                 affected_tests.append(item)
                 continue
 
-            # Check if the test file is affected by source file changes
+            # Check if the test file is affected by changes (now includes dependency tracking)
             if test_file in self.affected_files:
-                affected_tests.append(item)
-                continue
-
-            # Check if the test file tests any affected source files
-            if self._test_covers_affected_files(test_file):
                 affected_tests.append(item)
 
         return affected_tests
-
-    def _test_covers_affected_files(self, test_file: Path) -> bool:
-        """Check if a test file covers any of the affected source files."""
-        # Simple heuristic: match test file path with source file path
-        # test_something.py -> something.py
-        # tests/test_module.py -> src/module.py or module.py
-
-        test_name = test_file.name
-        if test_name.startswith("test_"):
-            source_name = test_name[5:]  # Remove 'test_' prefix
-        else:
-            return False
-
-        # Look for corresponding source files in affected files
-        for affected_file in self.affected_files:
-            if affected_file.name == source_name:
-                return True
-            # Also check if the test directory structure matches source structure
-            if self._paths_match(test_file, affected_file):
-                return True
-
-        return False
-
-    def _paths_match(self, test_file: Path, source_file: Path) -> bool:
-        """Check if test file path corresponds to source file path."""
-        # Convert paths to relative and normalize
-        try:
-            test_rel = test_file.relative_to(self.root_dir)
-            source_rel = source_file.relative_to(self.root_dir)
-        except ValueError:
-            return False
-
-        # Flexible matching logic that works with configurable directories
-        test_parts = list(test_rel.parts)
-        source_parts = list(source_rel.parts)
-
-        if len(test_parts) != len(source_parts):
-            return False
-
-        for i, (test_part, source_part) in enumerate(zip(test_parts, source_parts)):
-            if i == 0:  # First part: check if test dir vs source dir
-                # Check if test_part is in configured test dirs and source_part is in configured source dirs
-                test_is_test_dir = test_part in self.test_dirs or any(
-                    test_part.startswith(td.rstrip("/")) for td in self.test_dirs
-                )
-                source_is_source_dir = source_part in self.source_dirs or any(
-                    source_part.startswith(sd.rstrip("/")) for sd in self.source_dirs
-                )
-
-                if test_is_test_dir and source_is_source_dir:
-                    continue
-                elif test_part == source_part:
-                    continue
-                else:
-                    return False
-            elif i == len(test_parts) - 1:  # Last part: filename
-                if test_part.startswith("test_") and test_part[5:] == source_part:
-                    return True
-                else:
-                    return False
-            else:  # Middle parts: should match exactly
-                if test_part != source_part:
-                    return False
-
-        return False
 
     def _generate_visualization(self) -> None:
         """Generate dependency graph visualization."""
