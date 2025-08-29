@@ -23,7 +23,7 @@ class TestDeltaManager:
             metadata = {
                 "last_commit": "abc123",
                 "last_successful_run": True,
-                "version": "0.1.0",
+                "version": "1.2.3",
             }
 
             manager.save_metadata(metadata)
@@ -53,6 +53,164 @@ class TestDeltaManager:
 
             with pytest.raises(ValueError, match="Failed to load delta metadata"):
                 manager.load_metadata()
+
+    def test_detect_project_version_from_pyproject_toml_poetry(self):
+        """Test version detection from pyproject.toml with Poetry format."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create pyproject.toml with Poetry-style version
+            pyproject_path = Path(temp_dir) / "pyproject.toml"
+            with open(pyproject_path, "w") as f:
+                f.write('[tool.poetry]\nname = "test-project"\nversion = "1.2.3"')
+
+            root_dir = Path(temp_dir)
+            version = manager._detect_project_version(root_dir)
+
+            assert version == "1.2.3"
+
+    def test_detect_project_version_from_pyproject_toml_pep621(self):
+        """Test version detection from pyproject.toml with PEP 621 format."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create pyproject.toml with PEP 621-style version
+            pyproject_path = Path(temp_dir) / "pyproject.toml"
+            with open(pyproject_path, "w") as f:
+                f.write('[project]\nname = "test-project"\nversion = "2.3.4"')
+
+            root_dir = Path(temp_dir)
+            version = manager._detect_project_version(root_dir)
+
+            assert version == "2.3.4"
+
+    def test_detect_project_version_from_init_py_src(self):
+        """Test version detection from __init__.py in src directory."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create src/mypackage/__init__.py with __version__
+            src_dir = Path(temp_dir) / "src"
+            package_dir = src_dir / "mypackage"
+            package_dir.mkdir(parents=True)
+
+            init_path = package_dir / "__init__.py"
+            with open(init_path, "w") as f:
+                f.write('"""My package."""\n__version__ = "3.4.5"\n')
+
+            root_dir = Path(temp_dir)
+            version = manager._detect_project_version(root_dir)
+
+            assert version == "3.4.5"
+
+    def test_detect_project_version_from_init_py_root(self):
+        """Test version detection from __init__.py in root directory."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create mypackage/__init__.py with __version__
+            package_dir = Path(temp_dir) / "mypackage"
+            package_dir.mkdir()
+
+            init_path = package_dir / "__init__.py"
+            with open(init_path, "w") as f:
+                f.write('__version__ = "4.5.6"\n')
+
+            root_dir = Path(temp_dir)
+            version = manager._detect_project_version(root_dir)
+
+            assert version == "4.5.6"
+
+    def test_detect_project_version_poetry_takes_priority(self):
+        """Test that pyproject.toml poetry version takes priority over __init__.py."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create pyproject.toml with Poetry-style version
+            pyproject_path = Path(temp_dir) / "pyproject.toml"
+            with open(pyproject_path, "w") as f:
+                f.write('[tool.poetry]\nname = "test-project"\nversion = "1.0.0"')
+
+            # Create package with different version
+            package_dir = Path(temp_dir) / "mypackage"
+            package_dir.mkdir()
+            init_path = package_dir / "__init__.py"
+            with open(init_path, "w") as f:
+                f.write('__version__ = "2.0.0"\n')
+
+            root_dir = Path(temp_dir)
+            version = manager._detect_project_version(root_dir)
+
+            # Should prefer pyproject.toml
+            assert version == "1.0.0"
+
+    def test_detect_project_version_no_version_found(self):
+        """Test version detection returns None when no version found."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            root_dir = Path(temp_dir)
+            version = manager._detect_project_version(root_dir)
+
+            assert version is None
+
+    def test_detect_project_version_malformed_pyproject_toml(self):
+        """Test version detection continues to __init__.py when pyproject.toml is malformed."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create malformed pyproject.toml
+            pyproject_path = Path(temp_dir) / "pyproject.toml"
+            with open(pyproject_path, "w") as f:
+                f.write("invalid toml content [")
+
+            # Create package with version
+            package_dir = Path(temp_dir) / "mypackage"
+            package_dir.mkdir()
+            init_path = package_dir / "__init__.py"
+            with open(init_path, "w") as f:
+                f.write('__version__ = "1.2.3"\n')
+
+            root_dir = Path(temp_dir)
+            version = manager._detect_project_version(root_dir)
+
+            # Should fall back to __init__.py
+            assert version == "1.2.3"
+
+    @patch("pytest_delta.delta_manager.Repo")
+    def test_update_metadata_uses_detected_version(self, mock_repo):
+        """Test that update_metadata uses detected project version."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create pyproject.toml with version
+            pyproject_path = Path(temp_dir) / "pyproject.toml"
+            with open(pyproject_path, "w") as f:
+                f.write('[tool.poetry]\nname = "test-project"\nversion = "1.2.3"')
+
+            # Mock successful repo with commit
+            mock_repo_instance = Mock()
+            mock_repo_instance.head.commit.hexsha = "abc123"
+            mock_repo.return_value = mock_repo_instance
+
+            root_dir = Path(temp_dir).resolve()
+            manager.update_metadata(root_dir)
+
+            # Load the saved metadata
+            metadata = manager.load_metadata()
+
+            # Verify the detected version was used
+            assert metadata["version"] == "1.2.3"
+            assert metadata["last_commit"] == "abc123"
+            assert metadata["last_successful_run"] is True
 
     @patch("pytest_delta.delta_manager.Repo")
     def test_update_metadata_parent_git_search(self, mock_repo):
@@ -191,9 +349,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -233,16 +391,14 @@ class TestDependencyAnalyzer:
 
             # b.py should depend on a.py
             deps = analyzer._extract_dependencies(module_b, all_files)
-            assert (
-                module_a in deps
-            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
+            assert module_a in deps, f"Expected a.py to be a dependency of b.py, but got: {deps}"
 
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert (
-                module_a in dependency_graph[module_b]
-            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            assert module_a in dependency_graph[module_b], (
+                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            )
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -743,9 +899,7 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(
-                temp_path, test_dirs=["unit_tests", "integration_tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -817,9 +971,9 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
 
     def test_path_matching_with_custom_directories(self):
         """Test path matching between test and source files with custom directories."""
