@@ -784,6 +784,30 @@ class TestDeltaPlugin:
         
         mock_print.assert_not_called()
 
+    def test_debug_flag_registers_plugin(self):
+        """Test that debug flag alone registers the plugin."""
+        from pytest_delta.plugin import pytest_configure
+        
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta": False,
+            "--delta-vis": False,
+            "--delta-debug": True,
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+        
+        config.pluginmanager = Mock()
+        
+        pytest_configure(config)
+        
+        # Plugin should be registered when debug flag is used
+        config.pluginmanager.register.assert_called_once()
+
 
 def test_pytest_integration():
     """Integration test to ensure the plugin can be loaded by pytest."""

@@ -78,7 +78,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure the plugin if --delta flag is used."""
-    if config.getoption("--delta") or config.getoption("--delta-vis"):
+    if config.getoption("--delta") or config.getoption("--delta-vis") or config.getoption("--delta-debug"):
         config.pluginmanager.register(DeltaPlugin(config), "delta-plugin")
 
 
