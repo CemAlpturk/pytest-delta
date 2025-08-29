@@ -766,7 +766,7 @@ class TestDeltaPlugin:
 
         plugin = DeltaPlugin(config)
         plugin._print_debug("test debug message")
-        
+
         mock_print.assert_called_with("[pytest-delta] DEBUG: test debug message")
 
         # Test debug disabled - should not print
@@ -781,13 +781,13 @@ class TestDeltaPlugin:
         plugin2 = DeltaPlugin(config)
         mock_print.reset_mock()
         plugin2._print_debug("should not print")
-        
+
         mock_print.assert_not_called()
 
     def test_debug_flag_registers_plugin(self):
         """Test that debug flag alone registers the plugin."""
         from pytest_delta.plugin import pytest_configure
-        
+
         config = Mock()
         config.getoption.side_effect = lambda opt: {
             "--delta": False,
@@ -800,11 +800,11 @@ class TestDeltaPlugin:
             "--delta-source-dirs": [],
             "--delta-test-dirs": [],
         }.get(opt, [])
-        
+
         config.pluginmanager = Mock()
-        
+
         pytest_configure(config)
-        
+
         # Plugin should be registered when debug flag is used
         config.pluginmanager.register.assert_called_once()
 

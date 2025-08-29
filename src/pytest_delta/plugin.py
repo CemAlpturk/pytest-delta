@@ -78,7 +78,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure the plugin if --delta flag is used."""
-    if config.getoption("--delta") or config.getoption("--delta-vis") or config.getoption("--delta-debug"):
+    if (
+        config.getoption("--delta")
+        or config.getoption("--delta-vis")
+        or config.getoption("--delta-debug")
+    ):
         config.pluginmanager.register(DeltaPlugin(config), "delta-plugin")
 
 
@@ -117,7 +121,7 @@ class DeltaPlugin:
         self.affected_files: Set[Path] = set()
         self.changed_test_files: Set[Path] = set()
         self.should_run_all = False
-        
+
         # Debug information storage
         self.changed_source_files: Set[Path] = set()
         self.all_changed_files: Set[Path] = set()
@@ -343,62 +347,70 @@ class DeltaPlugin:
         """Print detailed debug information about the analysis results."""
         if not self.debug:
             return
-            
+
         self._print_debug("=== Delta Analysis Debug Information ===")
-        
+
         # Changed files breakdown
         if self.all_changed_files:
             self._print_debug(f"Total changed files: {len(self.all_changed_files)}")
-            
+
             if self.changed_source_files:
                 source_files_str = ", ".join(
                     str(f.relative_to(self.root_dir)) for f in sorted(self.changed_source_files)
                 )
-                self._print_debug(f"Changed source files ({len(self.changed_source_files)}): {source_files_str}")
+                self._print_debug(
+                    f"Changed source files ({len(self.changed_source_files)}): {source_files_str}"
+                )
             else:
                 self._print_debug("Changed source files: None")
-                
+
             if self.changed_test_files:
                 test_files_str = ", ".join(
                     str(f.relative_to(self.root_dir)) for f in sorted(self.changed_test_files)
                 )
-                self._print_debug(f"Changed test files ({len(self.changed_test_files)}): {test_files_str}")
+                self._print_debug(
+                    f"Changed test files ({len(self.changed_test_files)}): {test_files_str}"
+                )
             else:
                 self._print_debug("Changed test files: None")
         else:
             self._print_debug("No files changed")
-            
+
         # Affected files (result of dependency analysis)
         if self.affected_files:
             affected_files_str = ", ".join(
                 str(f.relative_to(self.root_dir)) for f in sorted(self.affected_files)
             )
-            self._print_debug(f"Files affected by changes ({len(self.affected_files)}): {affected_files_str}")
+            self._print_debug(
+                f"Files affected by changes ({len(self.affected_files)}): {affected_files_str}"
+            )
         else:
             self._print_debug("No files affected by changes")
-            
+
         # Test files that will be run
         try:
             # Get all Python test files to understand the filtering
             all_test_files = self.dependency_analyzer._find_test_files()
             selected_test_files = set()
-            
+
             # Determine which test files will be selected
             for test_file in all_test_files:
                 if test_file in self.changed_test_files or test_file in self.affected_files:
                     selected_test_files.add(test_file)
-                    
+
             if selected_test_files:
                 selected_test_files_str = ", ".join(
                     str(f.relative_to(self.root_dir)) for f in sorted(selected_test_files)
                 )
-                self._print_debug(f"Test files to be run ({len(selected_test_files)}): {selected_test_files_str}")
+                self._print_debug(
+                    f"Test files to be run ({len(selected_test_files)}): {selected_test_files_str}"
+                )
             else:
                 self._print_debug("No test files will be run")
-                
+
         except Exception as e:
             self._print_debug(f"Error determining selected test files: {e}")
-            
+
         self._print_debug("=== End Debug Information ===")
 
     def _print_info(self, message: str) -> None:
