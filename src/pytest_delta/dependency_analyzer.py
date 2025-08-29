@@ -318,8 +318,9 @@ class DependencyAnalyzer:
                     file_relative = file_path.relative_to(self.root_dir)
                     # Check if the relative path matches the potential path exactly
                     # or if it's in a subdirectory structure that matches
-                    if (str(file_relative) == str(potential_path) or
-                        str(file_relative).endswith("/" + str(potential_path))):
+                    if str(file_relative) == str(potential_path) or str(file_relative).endswith(
+                        "/" + str(potential_path)
+                    ):
                         return file_path
                 except ValueError:
                     continue

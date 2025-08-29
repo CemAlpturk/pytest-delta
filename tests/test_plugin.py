@@ -1116,9 +1116,7 @@ class TestUnstagedChangesBugFix:
             test_calculator_file = tests_dir / "test_calculator.py"
             test_calculator_file.write_text("from calculator import add")
 
-            analyzer = DependencyAnalyzer(
-                temp_path, source_dirs=["src"], test_dirs=["tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, source_dirs=["src"], test_dirs=["tests"])
 
             all_files = {calculator_file, test_calculator_file}
 
@@ -1164,14 +1162,12 @@ def test_add():
 
             # Commit initial version
             repo.index.add([str(calculator_file), str(test_calculator_file)])
-            initial_commit = repo.index.commit("Initial commit")
+            repo.index.commit("Initial commit")
 
             # Make unstaged change to source file
             calculator_file.write_text("def add(x, y):\n    return x + y + 1\n")
 
-            analyzer = DependencyAnalyzer(
-                temp_path, source_dirs=[".", "src"], test_dirs=["tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, source_dirs=[".", "src"], test_dirs=["tests"])
 
             # Build dependency graph
             dependency_graph = analyzer.build_dependency_graph()
