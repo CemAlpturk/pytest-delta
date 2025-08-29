@@ -191,9 +191,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -224,7 +224,9 @@ class TestDependencyAnalyzer:
             module_b = temp_path / "b.py"
 
             module_a.write_text("def some_fn(x):\n    return x + 1\n")
-            module_b.write_text("from .a import some_fn\n\ndef other_fn(x):\n    return some_fn(x) + 2\n")
+            module_b.write_text(
+                "from .a import some_fn\n\ndef other_fn(x):\n    return some_fn(x) + 2\n"
+            )
 
             analyzer = DependencyAnalyzer(temp_path)
             all_files = {module_a, module_b}
@@ -236,7 +238,9 @@ class TestDependencyAnalyzer:
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert module_a in dependency_graph[module_b], f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            assert module_a in dependency_graph[module_b], (
+                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            )
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -737,9 +741,7 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(
-                temp_path, test_dirs=["unit_tests", "integration_tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -811,9 +813,9 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
 
     def test_path_matching_with_custom_directories(self):
         """Test path matching between test and source files with custom directories."""
