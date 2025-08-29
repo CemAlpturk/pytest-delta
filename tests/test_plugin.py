@@ -214,6 +214,36 @@ class TestDependencyAnalyzer:
 
             assert module_b in deps
 
+    def test_extract_dependencies_relative_import(self):
+        """Test extracting dependencies from relative imports."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir).resolve()
+
+            # Create test files as described in the issue
+            module_a = temp_path / "a.py"
+            module_b = temp_path / "b.py"
+
+            module_a.write_text("def some_fn(x):\n    return x + 1\n")
+            module_b.write_text(
+                "from .a import some_fn\n\ndef other_fn(x):\n    return some_fn(x) + 2\n"
+            )
+
+            analyzer = DependencyAnalyzer(temp_path)
+            all_files = {module_a, module_b}
+
+            # b.py should depend on a.py
+            deps = analyzer._extract_dependencies(module_b, all_files)
+            assert (
+                module_a in deps
+            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
+
+            # Test the full dependency graph
+            dependency_graph = analyzer.build_dependency_graph()
+            assert module_b in dependency_graph, "b.py should be in dependency graph"
+            assert (
+                module_a in dependency_graph[module_b]
+            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
         with tempfile.TemporaryDirectory() as temp_dir:
