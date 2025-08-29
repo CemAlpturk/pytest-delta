@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+from git import Repo
 
 from pytest_delta.delta_manager import DeltaManager
 from pytest_delta.dependency_analyzer import DependencyAnalyzer
@@ -1091,3 +1092,94 @@ class TestConfigurableDirectories:
                 assert is_test == expected, (
                     f"Failed for {file_path_str}: expected {expected}, got {is_test}"
                 )
+
+
+class TestUnstagedChangesBugFix:
+    """Test cases for the unstaged changes bug fix (issue #25)."""
+
+    def test_resolve_import_to_file_avoids_suffix_false_positives(self):
+        """Test that import resolution avoids false positive suffix matches."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create a structure where suffix matching could cause false positives
+            src_dir = temp_path / "src"
+            tests_dir = temp_path / "tests"
+            src_dir.mkdir()
+            tests_dir.mkdir()
+
+            # Create source file
+            calculator_file = src_dir / "calculator.py"
+            calculator_file.write_text("def add(x, y): return x + y")
+
+            # Create test file with similar name that could match incorrectly
+            test_calculator_file = tests_dir / "test_calculator.py"
+            test_calculator_file.write_text("from calculator import add")
+
+            analyzer = DependencyAnalyzer(temp_path, source_dirs=["src"], test_dirs=["tests"])
+
+            all_files = {calculator_file, test_calculator_file}
+
+            # Test that "calculator" resolves to the correct file, not the test file
+            result = analyzer._resolve_import_to_file("calculator", all_files)
+
+            # Should resolve to src/calculator.py, NOT tests/test_calculator.py
+            assert result == calculator_file
+            assert result != test_calculator_file
+
+    def test_unstaged_changes_with_dependencies(self):
+        """Test that unstaged changes to source files correctly affect dependent test files."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Initialize git repository
+            repo = Repo.init(temp_path)
+            repo.config_writer().set_value("user", "name", "Test User").release()
+            repo.config_writer().set_value("user", "email", "test@example.com").release()
+
+            # Create project structure
+            src_dir = temp_path / "src"
+            tests_dir = temp_path / "tests"
+            src_dir.mkdir()
+            tests_dir.mkdir()
+
+            # Create source file
+            calculator_file = src_dir / "calculator.py"
+            calculator_file.write_text("def add(x, y):\n    return x + y\n")
+
+            # Create test file that imports from source file
+            test_calculator_file = tests_dir / "test_calculator.py"
+            test_calculator_file.write_text("""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from calculator import add
+
+def test_add():
+    assert add(2, 3) == 5
+""")
+
+            # Commit initial version
+            repo.index.add([str(calculator_file), str(test_calculator_file)])
+            repo.index.commit("Initial commit")
+
+            # Make unstaged change to source file
+            calculator_file.write_text("def add(x, y):\n    return x + y + 1\n")
+
+            analyzer = DependencyAnalyzer(temp_path, source_dirs=[".", "src"], test_dirs=["tests"])
+
+            # Build dependency graph
+            dependency_graph = analyzer.build_dependency_graph()
+
+            # Test file should depend on source file
+            assert test_calculator_file in dependency_graph
+            assert calculator_file in dependency_graph[test_calculator_file]
+
+            # When source file changes, test file should be affected
+            changed_files = {calculator_file}
+            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+
+            # Both source and test files should be affected
+            assert calculator_file in affected_files
+            assert test_calculator_file in affected_files
