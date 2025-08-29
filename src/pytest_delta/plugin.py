@@ -56,6 +56,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Generate a visual representation of the project's dependency graph",
     )
+    group.addoption(
+        "--delta-source-dirs",
+        action="append",
+        default=[],
+        help="Source directories to search for Python files (default: project root and src/). Can be used multiple times.",
+    )
+    group.addoption(
+        "--delta-test-dirs",
+        action="append", 
+        default=[],
+        help="Test directories to search for test files (default: tests). Can be used multiple times.",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -81,10 +93,18 @@ class DeltaPlugin:
         self.force_regenerate = config.getoption("--delta-force")
         self.ignore_patterns = config.getoption("--delta-ignore")
         self.enable_visualization = config.getoption("--delta-vis")
+        
+        # Get configurable directories with backwards compatible defaults
+        self.source_dirs = config.getoption("--delta-source-dirs") or [".", "src"]
+        self.test_dirs = config.getoption("--delta-test-dirs") or ["tests"]
+        
         self.root_dir = Path.cwd().resolve()
         self.delta_manager = DeltaManager(self.delta_file)
         self.dependency_analyzer = DependencyAnalyzer(
-            self.root_dir, ignore_patterns=self.ignore_patterns
+            self.root_dir, 
+            ignore_patterns=self.ignore_patterns,
+            source_dirs=self.source_dirs,
+            test_dirs=self.test_dirs
         )
         self.visualizer = DependencyVisualizer(self.root_dir)
         self.affected_files: Set[Path] = set()
@@ -309,9 +329,7 @@ class DeltaPlugin:
         except ValueError:
             return False
 
-        # Simple matching logic:
-        # tests/test_module.py matches src/module.py
-        # tests/subdir/test_module.py matches src/subdir/module.py
+        # Flexible matching logic that works with configurable directories
         test_parts = list(test_rel.parts)
         source_parts = list(source_rel.parts)
 
@@ -319,8 +337,12 @@ class DeltaPlugin:
             return False
 
         for i, (test_part, source_part) in enumerate(zip(test_parts, source_parts)):
-            if i == 0:  # First part: tests vs src
-                if test_part == "tests" and source_part == "src":
+            if i == 0:  # First part: check if test dir vs source dir
+                # Check if test_part is in configured test dirs and source_part is in configured source dirs
+                test_is_test_dir = test_part in self.test_dirs or any(test_part.startswith(td.rstrip('/')) for td in self.test_dirs)
+                source_is_source_dir = source_part in self.source_dirs or any(source_part.startswith(sd.rstrip('/')) for sd in self.source_dirs)
+                
+                if test_is_test_dir and source_is_source_dir:
                     continue
                 elif test_part == source_part:
                     continue
