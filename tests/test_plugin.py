@@ -375,9 +375,7 @@ class TestDependencyAnalyzer:
 
             # Simulate a change to utils.py (the base module)
             changed_files = {utils_py}
-            affected_files = analyzer.find_affected_files(
-                changed_files, dependency_graph
-            )
+            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
 
             # All files that import utils.py should be affected
             expected_affected = {
@@ -411,9 +409,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -453,16 +451,14 @@ class TestDependencyAnalyzer:
 
             # b.py should depend on a.py
             deps = analyzer._extract_dependencies(module_b, all_files)
-            assert (
-                module_a in deps
-            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
+            assert module_a in deps, f"Expected a.py to be a dependency of b.py, but got: {deps}"
 
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert (
-                module_a in dependency_graph[module_b]
-            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            assert module_a in dependency_graph[module_b], (
+                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            )
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -938,9 +934,7 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(
-                temp_path, test_dirs=["unit_tests", "integration_tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -1012,6 +1006,6 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
