@@ -321,11 +321,16 @@ class DependencyAnalyzer:
         # Remove the file name to get the directory
         current_dir_parts = list(file_rel_path.parent.parts)
 
-        # Remove 'level' number of directories
-        if level > len(current_dir_parts):
+        # For relative imports, level indicates how many levels up to go
+        # level=1 means current directory, level=2 means parent directory, etc.
+        # So we need to go up (level-1) directories from the current directory
+        levels_to_go_up = level - 1
+        
+        # Check if we can go up that many levels
+        if levels_to_go_up > len(current_dir_parts):
             return None
 
-        base_parts = current_dir_parts[:-level] if level > 0 else current_dir_parts
+        base_parts = current_dir_parts[:-levels_to_go_up] if levels_to_go_up > 0 else current_dir_parts
 
         if module_name:
             module_parts = module_name.split(".")
