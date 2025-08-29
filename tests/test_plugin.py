@@ -660,3 +660,153 @@ class TestDeltaPluginVisualization:
 
         plugin = DeltaPlugin(config)
         assert plugin.enable_visualization is False
+
+
+class TestConfigurableDirectories:
+    """Test cases for configurable source and test directories."""
+
+    def test_default_directories(self):
+        """Test default directories when no configuration provided."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            analyzer = DependencyAnalyzer(temp_path)
+            
+            # Default should include both root and src for source dirs
+            assert analyzer.source_dirs == [".", "src"]
+            # Default should be tests for test dirs
+            assert analyzer.test_dirs == ["tests"]
+
+    def test_custom_source_directories(self):
+        """Test custom source directories configuration."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # Create custom directory structure
+            lib_dir = temp_path / "lib"
+            lib_dir.mkdir()
+            (lib_dir / "module1.py").touch()
+            
+            app_dir = temp_path / "app" 
+            app_dir.mkdir()
+            (app_dir / "module2.py").touch()
+
+            # Create analyzer with custom source dirs
+            analyzer = DependencyAnalyzer(temp_path, source_dirs=["lib", "app"])
+            source_files = analyzer._find_source_files()
+
+            assert len(source_files) == 2
+            file_names = {f.name for f in source_files}
+            assert file_names == {"module1.py", "module2.py"}
+
+    def test_custom_test_directories(self):
+        """Test custom test directories configuration.""" 
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # Create custom test structure
+            unit_tests_dir = temp_path / "unit_tests"
+            unit_tests_dir.mkdir()
+            (unit_tests_dir / "test_unit.py").touch()
+            
+            integration_tests_dir = temp_path / "integration_tests"
+            integration_tests_dir.mkdir() 
+            (integration_tests_dir / "test_integration.py").touch()
+
+            # Create analyzer with custom test dirs
+            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
+            test_files = analyzer._find_test_files()
+
+            assert len(test_files) == 2
+            file_names = {f.name for f in test_files}
+            assert file_names == {"test_unit.py", "test_integration.py"}
+
+    def test_plugin_configurable_directories(self):
+        """Test plugin with configurable directories."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-source-dirs": ["lib", "src"],
+            "--delta-test-dirs": ["unit_tests", "integration_tests"],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        
+        # Check that plugin passes configured dirs to analyzer
+        assert plugin.source_dirs == ["lib", "src"]
+        assert plugin.test_dirs == ["unit_tests", "integration_tests"]
+        assert plugin.dependency_analyzer.source_dirs == ["lib", "src"]
+        assert plugin.dependency_analyzer.test_dirs == ["unit_tests", "integration_tests"]
+
+    def test_plugin_default_directories_when_empty(self):
+        """Test plugin uses defaults when empty lists provided."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-source-dirs": [],  # Empty list should trigger default
+            "--delta-test-dirs": [],     # Empty list should trigger default
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        
+        # Should use defaults when empty lists provided  
+        assert plugin.source_dirs == [".", "src"]
+        assert plugin.test_dirs == ["tests"]
+
+    def test_is_test_file_with_custom_test_dirs(self):
+        """Test test file detection with custom test directories."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            analyzer = DependencyAnalyzer(temp_path, test_dirs=["specs", "unit_tests"])
+            
+            # Test files in custom test directories
+            test_cases = [
+                ("specs/user_spec.py", True),
+                ("unit_tests/test_helper.py", True), 
+                ("tests/test_something.py", True),   # Still test file due to test_ prefix
+                ("src/test_helper.py", True),       # Starts with test_
+                ("src/helper_test.py", True),       # Ends with _test.py
+                ("src/module.py", False),
+                ("other/regular.py", False),
+            ]
+
+            for file_path_str, expected in test_cases:
+                file_path = temp_path / file_path_str
+                is_test = analyzer._is_test_file(file_path, file_path_str)
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+
+    def test_path_matching_with_custom_directories(self):
+        """Test path matching between test and source files with custom directories."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-source-dirs": ["lib"],
+            "--delta-test-dirs": ["specs"],
+        }.get(opt, [])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            plugin = DeltaPlugin(config)
+            plugin.root_dir = temp_path
+
+            # Create test paths
+            test_file = temp_path / "specs" / "test_module.py"
+            source_file = temp_path / "lib" / "module.py"
+
+            assert plugin._paths_match(test_file, source_file) is True
+
+            # Test non-matching paths
+            other_file = temp_path / "lib" / "other.py"
+            assert plugin._paths_match(test_file, other_file) is False

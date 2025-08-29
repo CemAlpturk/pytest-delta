@@ -14,9 +14,11 @@ from typing import Dict, List, Set
 class DependencyAnalyzer:
     """Analyzes Python file dependencies based on imports."""
 
-    def __init__(self, root_dir: Path, ignore_patterns: List[str] | None = None):
+    def __init__(self, root_dir: Path, ignore_patterns: List[str] | None = None, source_dirs: List[str] | None = None, test_dirs: List[str] | None = None):
         self.root_dir = root_dir
         self.ignore_patterns = ignore_patterns or []
+        self.source_dirs = source_dirs or [".", "src"]
+        self.test_dirs = test_dirs or ["tests"]
 
     def build_dependency_graph(self) -> Dict[Path, Set[Path]]:
         """
@@ -85,20 +87,23 @@ class DependencyAnalyzer:
         """Find all Python files in the project."""
         python_files = set()
 
-        # Search in common Python directories
-        search_dirs = [
-            self.root_dir / "src",
-            self.root_dir / "tests",
-        ]
-
-        # Also check for Python files in the root directory (but not recursively)
-        for file_path in self.root_dir.glob("*.py"):
-            if file_path.is_file():
-                python_files.add(file_path.resolve())
+        # Search in configured source and test directories
+        search_dirs = []
+        for source_dir in self.source_dirs:
+            search_dirs.append(self.root_dir / source_dir)
+        for test_dir in self.test_dirs:
+            search_dirs.append(self.root_dir / test_dir)
 
         for search_dir in search_dirs:
             if search_dir.is_dir():
-                python_files.update(search_dir.rglob("*.py"))
+                # If search_dir is the root directory, only get .py files directly in root (not recursive)
+                if search_dir == self.root_dir:
+                    for file_path in search_dir.glob("*.py"):
+                        if file_path.is_file():
+                            python_files.add(file_path.resolve())
+                else:
+                    # For subdirectories, search recursively
+                    python_files.update(search_dir.rglob("*.py"))
 
         # Filter out __pycache__, .venv, and other irrelevant files
         filtered_files = set()
@@ -132,19 +137,18 @@ class DependencyAnalyzer:
         """Find all Python source files in the project, excluding test files."""
         source_files = set()
 
-        # Search in common Python source directories
-        search_dirs = [
-            self.root_dir / "src",
-        ]
-
-        # Also check for Python files in the root directory (but not recursively)
-        for file_path in self.root_dir.glob("*.py"):
-            if file_path.is_file():
-                source_files.add(file_path.resolve())
-
-        for search_dir in search_dirs:
+        # Search in configured source directories
+        for source_dir in self.source_dirs:
+            search_dir = self.root_dir / source_dir
             if search_dir.is_dir():
-                source_files.update(search_dir.rglob("*.py"))
+                # If search_dir is the root directory, only get .py files directly in root (not recursive)
+                if search_dir == self.root_dir:
+                    for file_path in search_dir.glob("*.py"):
+                        if file_path.is_file():
+                            source_files.add(file_path.resolve())
+                else:
+                    # For subdirectories, search recursively
+                    source_files.update(search_dir.rglob("*.py"))
 
         # Filter out __pycache__, .venv, test files and other irrelevant files
         filtered_files = set()
@@ -197,10 +201,13 @@ class DependencyAnalyzer:
 
     def _is_test_file(self, file_path: Path, relative_path_str: str) -> bool:
         """Determine if a file is a test file."""
-        # Check if file is in tests directory
-        if "tests/" in relative_path_str or relative_path_str.startswith("tests"):
-            return True
+        # Check if file is in configured test directories
+        for test_dir in self.test_dirs:
+            test_path = test_dir.rstrip('/') + '/'
+            if test_path in relative_path_str or relative_path_str.startswith(test_dir):
+                return True
 
+        # If no custom test directories match, also check filename patterns
         # Check if filename starts with "test_"
         if file_path.name.startswith("test_"):
             return True
@@ -277,9 +284,14 @@ class DependencyAnalyzer:
         # Try as a package with __init__.py
         potential_paths.append(Path(*parts) / "__init__.py")
 
-        # Try in src/ directory
-        potential_paths.append(Path("src") / Path(*parts) / "__init__.py")
-        potential_paths.append((Path("src") / Path(*parts)).with_suffix(".py"))
+        # Try in configured source directories
+        for source_dir in self.source_dirs:
+            if source_dir == ".":
+                # Already handled above for direct paths
+                continue
+            source_path = Path(source_dir)
+            potential_paths.append(source_path / Path(*parts) / "__init__.py")
+            potential_paths.append((source_path / Path(*parts)).with_suffix(".py"))
 
         # Search for matches in all known files
         for potential_path in potential_paths:
