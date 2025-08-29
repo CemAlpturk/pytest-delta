@@ -301,8 +301,8 @@ class TestDependencyAnalyzer:
             file_names = {f.name for f in test_files}
             assert file_names == {"test_module1.py", "__init__.py"}
 
-    def test_build_dependency_graph_excludes_test_files(self):
-        """Test that dependency graph only includes source files."""
+    def test_build_dependency_graph_includes_test_files(self):
+        """Test that dependency graph includes both source and test files with their dependencies."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
@@ -323,12 +323,62 @@ class TestDependencyAnalyzer:
             analyzer = DependencyAnalyzer(temp_path)
             dependency_graph = analyzer.build_dependency_graph()
 
-            # Only source files should be in the graph
+            # Both source and test files should be in the graph
             graph_file_names = {f.name for f in dependency_graph.keys()}
-            assert graph_file_names == {"module_a.py", "module_b.py"}
+            assert graph_file_names == {"module_a.py", "module_b.py", "test_module_a.py"}
 
-            # Test file should not be in the dependency graph
-            assert test_file.resolve() not in dependency_graph
+            # Test file should be in the dependency graph
+            assert test_file.resolve() in dependency_graph
+            
+            # Test file should have dependency on module_a
+            test_dependencies = dependency_graph[test_file.resolve()]
+            assert module_a.resolve() in test_dependencies
+
+    def test_test_filtering_uses_import_dependencies(self):
+        """Test that test filtering now uses actual import dependencies instead of just name heuristics."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create realistic project structure demonstrating the issue
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+
+            # Source files
+            utils_py = src_dir / "utils.py"
+            utils_py.write_text("def add(a, b): return a + b")
+            
+            calculator_py = src_dir / "calculator.py"  
+            calculator_py.write_text("from .utils import add\nclass Calculator:\n    def calc(self, a, b):\n        return add(a, b)")
+
+            # Test files - mix of naming conventions
+            test_utils_py = tests_dir / "test_utils.py"  # Follows naming convention
+            test_utils_py.write_text("from src.utils import add\ndef test_add(): assert add(1,2) == 3")
+            
+            # This test file doesn't follow naming conventions but imports both utils and calculator
+            integration_test_py = tests_dir / "integration_test.py"
+            integration_test_py.write_text("from src.calculator import Calculator\nfrom src.utils import add\ndef test_integration(): pass")
+
+            analyzer = DependencyAnalyzer(temp_path)
+            dependency_graph = analyzer.build_dependency_graph()
+
+            # Simulate a change to utils.py (the base module)
+            changed_files = {utils_py}
+            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+
+            # All files that import utils.py should be affected
+            expected_affected = {
+                utils_py,  # The changed file itself
+                calculator_py,  # Imports utils
+                test_utils_py,  # Imports utils  
+                integration_test_py  # Imports both utils and calculator
+            }
+
+            assert affected_files == expected_affected, (
+                f"Expected {[f.relative_to(temp_path) for f in expected_affected]} "
+                f"but got {[f.relative_to(temp_path) for f in affected_files]}"
+            )
 
     def test_is_test_file_detection(self):
         """Test test file detection logic."""
@@ -567,31 +617,6 @@ class TestDeltaPlugin:
         # but the important thing is that no InvalidGitRepositoryError was raised
         assert plugin.should_run_all is True  # Due to missing delta file, not git error
 
-    def test_path_matching(self):
-        """Test path matching between test and source files."""
-        config = Mock()
-        config.getoption.side_effect = lambda opt: {
-            "--delta-filename": ".delta",
-            "--delta-dir": ".",
-            "--delta-force": False,
-        }.get(opt, False)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-
-            plugin = DeltaPlugin(config)
-            plugin.root_dir = temp_path
-
-            # Create test paths
-            test_file = temp_path / "tests" / "test_module.py"
-            source_file = temp_path / "src" / "module.py"
-
-            assert plugin._paths_match(test_file, source_file) is True
-
-            # Test non-matching paths
-            other_file = temp_path / "src" / "other.py"
-            assert plugin._paths_match(test_file, other_file) is False
-
     def test_separate_test_and_source_file_changes(self):
         """Test that test file changes and source file changes are handled separately."""
         config = Mock()
@@ -639,11 +664,11 @@ class TestDeltaPlugin:
             assert test_a.resolve() not in changed_source_files
             assert module_a.resolve() not in changed_test_files
 
-            # Build dependency graph should only include source files
+            # Build dependency graph should include both source and test files
             dependency_graph = plugin.dependency_analyzer.build_dependency_graph()
             assert module_a.resolve() in dependency_graph
             assert module_b.resolve() in dependency_graph
-            assert test_a.resolve() not in dependency_graph
+            assert test_a.resolve() in dependency_graph
 
     def test_filter_affected_tests_handles_direct_test_changes(self):
         """Test that directly changed test files are selected for testing."""
@@ -975,30 +1000,4 @@ class TestConfigurableDirectories:
                     f"Failed for {file_path_str}: expected {expected}, got {is_test}"
                 )
 
-    def test_path_matching_with_custom_directories(self):
-        """Test path matching between test and source files with custom directories."""
-        config = Mock()
-        config.getoption.side_effect = lambda opt: {
-            "--delta-filename": ".delta",
-            "--delta-dir": ".",
-            "--delta-force": False,
-            "--delta-ignore": [],
-            "--delta-source-dirs": ["lib"],
-            "--delta-test-dirs": ["specs"],
-        }.get(opt, [])
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir).resolve()
-
-            plugin = DeltaPlugin(config)
-            plugin.root_dir = temp_path
-
-            # Create test paths
-            test_file = temp_path / "specs" / "test_module.py"
-            source_file = temp_path / "lib" / "module.py"
-
-            assert plugin._paths_match(test_file, source_file) is True
-
-            # Test non-matching paths
-            other_file = temp_path / "lib" / "other.py"
-            assert plugin._paths_match(test_file, other_file) is False
