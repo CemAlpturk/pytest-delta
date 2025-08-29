@@ -726,6 +726,88 @@ class TestDeltaPlugin:
             assert len(affected_tests) == 1
             assert affected_tests[0] == test_item_a
 
+    def test_debug_flag_initialization(self):
+        """Test that debug flag is properly initialized."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-debug": True,
+            "--delta-ignore": [],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        assert plugin.debug is True
+
+        # Test debug disabled
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-debug": False,
+            "--delta-ignore": [],
+        }.get(opt, [])
+
+        plugin2 = DeltaPlugin(config)
+        assert plugin2.debug is False
+
+    @patch("builtins.print")
+    def test_debug_print_method(self, mock_print):
+        """Test that _print_debug method works correctly."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-debug": True,
+            "--delta-ignore": [],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        plugin._print_debug("test debug message")
+
+        mock_print.assert_called_with("[pytest-delta] DEBUG: test debug message")
+
+        # Test debug disabled - should not print
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-debug": False,
+            "--delta-ignore": [],
+        }.get(opt, [])
+
+        plugin2 = DeltaPlugin(config)
+        mock_print.reset_mock()
+        plugin2._print_debug("should not print")
+
+        mock_print.assert_not_called()
+
+    def test_debug_flag_registers_plugin(self):
+        """Test that debug flag alone registers the plugin."""
+        from pytest_delta.plugin import pytest_configure
+
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta": False,
+            "--delta-vis": False,
+            "--delta-debug": True,
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        config.pluginmanager = Mock()
+
+        pytest_configure(config)
+
+        # Plugin should be registered when debug flag is used
+        config.pluginmanager.register.assert_called_once()
+
 
 def test_pytest_integration():
     """Integration test to ensure the plugin can be loaded by pytest."""

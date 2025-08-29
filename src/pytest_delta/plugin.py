@@ -68,11 +68,21 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=[],
         help="Test directories to search for test files (default: tests). Can be used multiple times.",
     )
+    group.addoption(
+        "--delta-debug",
+        action="store_true",
+        default=False,
+        help="Display detailed debug information about changed files, affected files, and selected tests",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure the plugin if --delta flag is used."""
-    if config.getoption("--delta") or config.getoption("--delta-vis"):
+    if (
+        config.getoption("--delta")
+        or config.getoption("--delta-vis")
+        or config.getoption("--delta-debug")
+    ):
         config.pluginmanager.register(DeltaPlugin(config), "delta-plugin")
 
 
@@ -93,6 +103,7 @@ class DeltaPlugin:
         self.force_regenerate = config.getoption("--delta-force")
         self.ignore_patterns = config.getoption("--delta-ignore")
         self.enable_visualization = config.getoption("--delta-vis")
+        self.debug = config.getoption("--delta-debug")
 
         # Get configurable directories with backwards compatible defaults
         self.source_dirs = config.getoption("--delta-source-dirs") or [".", "src"]
@@ -110,6 +121,10 @@ class DeltaPlugin:
         self.affected_files: Set[Path] = set()
         self.changed_test_files: Set[Path] = set()
         self.should_run_all = False
+
+        # Debug information storage
+        self.changed_source_files: Set[Path] = set()
+        self.all_changed_files: Set[Path] = set()
 
     def pytest_collection_modifyitems(
         self, config: pytest.Config, items: List[pytest.Item]
@@ -152,6 +167,10 @@ class DeltaPlugin:
                     str(f.relative_to(self.root_dir)) for f in sorted(self.affected_files)
                 )
                 self._print_info(f"Affected files: {affected_files_str}")
+
+            # Debug information
+            if self.debug:
+                self._print_debug_analysis_results()
 
         except Exception as e:
             self._print_warning(f"Error in delta analysis: {e}")
@@ -202,6 +221,7 @@ class DeltaPlugin:
 
             if not changed_files:
                 # No changes detected
+                self._print_debug("No changed files detected since last commit")
                 return
 
             # Separate source files from test files in the changed files
@@ -223,6 +243,8 @@ class DeltaPlugin:
             # Store affected files and directly changed test files separately for filtering
             self.affected_files = affected_files
             self.changed_test_files = changed_test_files
+            self.changed_source_files = changed_source_files
+            self.all_changed_files = all_changed_files
 
         except Exception as e:
             self._print_warning(f"Error analyzing changes: {e}")
@@ -321,6 +343,76 @@ class DeltaPlugin:
         except Exception as e:
             self._print_warning(f"Failed to generate visualization: {e}")
 
+    def _print_debug_analysis_results(self) -> None:
+        """Print detailed debug information about the analysis results."""
+        if not self.debug:
+            return
+
+        self._print_debug("=== Delta Analysis Debug Information ===")
+
+        # Changed files breakdown
+        if self.all_changed_files:
+            self._print_debug(f"Total changed files: {len(self.all_changed_files)}")
+
+            if self.changed_source_files:
+                source_files_str = ", ".join(
+                    str(f.relative_to(self.root_dir)) for f in sorted(self.changed_source_files)
+                )
+                self._print_debug(
+                    f"Changed source files ({len(self.changed_source_files)}): {source_files_str}"
+                )
+            else:
+                self._print_debug("Changed source files: None")
+
+            if self.changed_test_files:
+                test_files_str = ", ".join(
+                    str(f.relative_to(self.root_dir)) for f in sorted(self.changed_test_files)
+                )
+                self._print_debug(
+                    f"Changed test files ({len(self.changed_test_files)}): {test_files_str}"
+                )
+            else:
+                self._print_debug("Changed test files: None")
+        else:
+            self._print_debug("No files changed")
+
+        # Affected files (result of dependency analysis)
+        if self.affected_files:
+            affected_files_str = ", ".join(
+                str(f.relative_to(self.root_dir)) for f in sorted(self.affected_files)
+            )
+            self._print_debug(
+                f"Files affected by changes ({len(self.affected_files)}): {affected_files_str}"
+            )
+        else:
+            self._print_debug("No files affected by changes")
+
+        # Test files that will be run
+        try:
+            # Get all Python test files to understand the filtering
+            all_test_files = self.dependency_analyzer._find_test_files()
+            selected_test_files = set()
+
+            # Determine which test files will be selected
+            for test_file in all_test_files:
+                if test_file in self.changed_test_files or test_file in self.affected_files:
+                    selected_test_files.add(test_file)
+
+            if selected_test_files:
+                selected_test_files_str = ", ".join(
+                    str(f.relative_to(self.root_dir)) for f in sorted(selected_test_files)
+                )
+                self._print_debug(
+                    f"Test files to be run ({len(selected_test_files)}): {selected_test_files_str}"
+                )
+            else:
+                self._print_debug("No test files will be run")
+
+        except Exception as e:
+            self._print_debug(f"Error determining selected test files: {e}")
+
+        self._print_debug("=== End Debug Information ===")
+
     def _print_info(self, message: str) -> None:
         """Print informational message."""
         print(f"[pytest-delta] {message}")
@@ -328,3 +420,8 @@ class DeltaPlugin:
     def _print_warning(self, message: str) -> None:
         """Print warning message."""
         print(f"[pytest-delta] WARNING: {message}")
+
+    def _print_debug(self, message: str) -> None:
+        """Print debug message if debug mode is enabled."""
+        if self.debug:
+            print(f"[pytest-delta] DEBUG: {message}")
