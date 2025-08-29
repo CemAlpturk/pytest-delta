@@ -213,7 +213,7 @@ class DeltaPlugin:
 
             # Build dependency graph including both source and test files
             dependency_graph = self.dependency_analyzer.build_dependency_graph()
-            
+
             # Find all files affected by the changes (including test files that depend on changed source files)
             all_changed_files = changed_source_files | changed_test_files
             affected_files = self.dependency_analyzer.find_affected_files(
