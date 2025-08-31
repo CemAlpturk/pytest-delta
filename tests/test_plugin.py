@@ -376,7 +376,9 @@ class TestDependencyAnalyzer:
 
             # Simulate a change to utils.py (the base module)
             changed_files = {utils_py}
-            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+            affected_files = analyzer.find_affected_files(
+                changed_files, dependency_graph
+            )
 
             # All files that import utils.py should be affected
             expected_affected = {
@@ -410,9 +412,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -452,14 +454,16 @@ class TestDependencyAnalyzer:
 
             # b.py should depend on a.py
             deps = analyzer._extract_dependencies(module_b, all_files)
-            assert module_a in deps, f"Expected a.py to be a dependency of b.py, but got: {deps}"
+            assert (
+                module_a in deps
+            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
 
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert module_a in dependency_graph[module_b], (
-                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
-            )
+            assert (
+                module_a in dependency_graph[module_b]
+            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -789,31 +793,31 @@ class TestDeltaPlugin:
         """Test that directory debug information is collected correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            
+
             # Create test structure
             src_dir = temp_path / "src"
             src_dir.mkdir()
             (src_dir / "module1.py").write_text("# test")
             (src_dir / "module2.py").write_text("# test")
-            
+
             tests_dir = temp_path / "tests"
             tests_dir.mkdir()
             (tests_dir / "test_module1.py").write_text("# test")
-            
+
             # Create analyzer with ignore patterns
             analyzer = DependencyAnalyzer(
-                temp_path, 
+                temp_path,
                 ignore_patterns=["test_*"],
                 source_dirs=[".", "src", "nonexistent"],
-                test_dirs=["tests", "missing"]
+                test_dirs=["tests", "missing"],
             )
-            
+
             # Trigger file finding to populate debug info
             python_files = analyzer._find_python_files()
-            
+
             # Get debug info
             debug_info = analyzer.get_debug_info()
-            
+
             # Validate debug info structure
             assert "configured_source_dirs" in debug_info
             assert "configured_test_dirs" in debug_info
@@ -821,21 +825,21 @@ class TestDeltaPlugin:
             assert "skipped_dirs" in debug_info
             assert "directory_file_counts" in debug_info
             assert "ignored_files" in debug_info
-            
+
             # Validate configured directories
             assert debug_info["configured_source_dirs"] == [".", "src", "nonexistent"]
             assert debug_info["configured_test_dirs"] == ["tests", "missing"]
-            
+
             # Validate searched vs skipped directories
             assert "src" in debug_info["searched_dirs"]
-            assert "tests" in debug_info["searched_dirs"] 
+            assert "tests" in debug_info["searched_dirs"]
             assert "nonexistent" in debug_info["skipped_dirs"]
             assert "missing" in debug_info["skipped_dirs"]
-            
+
             # Validate file counts
             assert debug_info["directory_file_counts"]["src"] == 2
             assert debug_info["directory_file_counts"]["tests"] == 1
-            
+
             # Validate ignored files
             assert "tests/test_module1.py" in debug_info["ignored_files"]
 
@@ -844,28 +848,30 @@ class TestDeltaPlugin:
         """Test that directory debug information is printed correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            
+
             # Create test structure
             src_dir = temp_path / "src"
             src_dir.mkdir()
             (src_dir / "module1.py").write_text("# test")
-            
+
             analyzer = DependencyAnalyzer(
-                temp_path, 
+                temp_path,
                 ignore_patterns=["*.backup"],
                 source_dirs=["src"],
-                test_dirs=["tests"]
+                test_dirs=["tests"],
             )
-            
+
             # Trigger file finding
             python_files = analyzer._find_python_files()
-            
+
             # Print debug info
             analyzer.print_directory_debug_info(lambda msg: print(msg))
-            
+
             # Verify print was called with expected content
-            printed_output = "\n".join(call.args[0] for call in mock_print.call_args_list)
-            
+            printed_output = "\n".join(
+                call.args[0] for call in mock_print.call_args_list
+            )
+
             assert "=== Directory Search Debug Information ===" in printed_output
             assert "Configured source directories: ['src']" in printed_output
             assert "Configured test directories: ['tests']" in printed_output
@@ -1104,7 +1110,9 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, test_dirs=["unit_tests", "integration_tests"]
+            )
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -1176,9 +1184,9 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
 
 class TestUnstagedChangesBugFix:
@@ -1203,7 +1211,9 @@ class TestUnstagedChangesBugFix:
             test_calculator_file = tests_dir / "test_calculator.py"
             test_calculator_file.write_text("from calculator import add")
 
-            analyzer = DependencyAnalyzer(temp_path, source_dirs=["src"], test_dirs=["tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, source_dirs=["src"], test_dirs=["tests"]
+            )
 
             all_files = {calculator_file, test_calculator_file}
 
@@ -1217,12 +1227,14 @@ class TestUnstagedChangesBugFix:
     def test_unstaged_changes_with_dependencies(self):
         """Test that unstaged changes to source files correctly affect dependent test files."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
+            temp_path = Path(temp_dir).resolve()
 
             # Initialize git repository
             repo = Repo.init(temp_path)
             repo.config_writer().set_value("user", "name", "Test User").release()
-            repo.config_writer().set_value("user", "email", "test@example.com").release()
+            repo.config_writer().set_value(
+                "user", "email", "test@example.com"
+            ).release()
 
             # Create project structure
             src_dir = temp_path / "src"
@@ -1236,7 +1248,8 @@ class TestUnstagedChangesBugFix:
 
             # Create test file that imports from source file
             test_calculator_file = tests_dir / "test_calculator.py"
-            test_calculator_file.write_text("""
+            test_calculator_file.write_text(
+                """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -1245,7 +1258,8 @@ from calculator import add
 
 def test_add():
     assert add(2, 3) == 5
-""")
+"""
+            )
 
             # Commit initial version
             repo.index.add([str(calculator_file), str(test_calculator_file)])
@@ -1254,7 +1268,9 @@ def test_add():
             # Make unstaged change to source file
             calculator_file.write_text("def add(x, y):\n    return x + y + 1\n")
 
-            analyzer = DependencyAnalyzer(temp_path, source_dirs=[".", "src"], test_dirs=["tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, source_dirs=[".", "src"], test_dirs=["tests"]
+            )
 
             # Build dependency graph
             dependency_graph = analyzer.build_dependency_graph()
@@ -1265,7 +1281,9 @@ def test_add():
 
             # When source file changes, test file should be affected
             changed_files = {calculator_file}
-            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+            affected_files = analyzer.find_affected_files(
+                changed_files, dependency_graph
+            )
 
             # Both source and test files should be affected
             assert calculator_file in affected_files
