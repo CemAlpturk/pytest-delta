@@ -348,6 +348,9 @@ class DeltaPlugin:
         if not self.debug:
             return
 
+        # Print directory search debug information first
+        self.dependency_analyzer.print_directory_debug_info(self._print_debug)
+
         self._print_debug("=== Delta Analysis Debug Information ===")
 
         # Changed files breakdown
