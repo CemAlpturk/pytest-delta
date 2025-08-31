@@ -50,6 +50,9 @@ On first run, it will execute all tests and create a `.delta.json` file with met
 - `--delta-force`: Force regeneration of delta file and run all tests
 - `--delta-ignore PATTERN`: Ignore file patterns during dependency analysis (can be used multiple times)
 - `--delta-vis`: Generate a visual representation of the project's dependency graph
+- `--delta-source-dirs PATH`: Source directories to search for Python files (default: project root and `src/`). Can be used multiple times.
+- `--delta-test-dirs PATH`: Test directories to search for test files (default: `tests`). Can be used multiple times.
+- `--delta-debug`: Display detailed debug information about changed files, affected files, and selected tests
 
 ### Examples
 
@@ -86,6 +89,21 @@ pytest --delta --delta-ignore "*generated*" --delta-ignore "vendor/*"
 
 # Ignore test files from dependency analysis (useful for complex test hierarchies)
 pytest --delta --delta-ignore "tests/integration/*"
+
+# Use custom source directories (for non-standard project layouts)
+pytest --delta --delta-source-dirs lib --delta-source-dirs modules
+
+# Use custom test directories
+pytest --delta --delta-test-dirs unit_tests --delta-test-dirs integration_tests
+
+# Combine custom directories
+pytest --delta --delta-source-dirs src --delta-source-dirs lib --delta-test-dirs tests --delta-test-dirs e2e
+
+# Enable debug output to see detailed information
+pytest --delta --delta-debug
+
+# Debug with custom directories
+pytest --delta --delta-debug --delta-source-dirs custom_src --delta-test-dirs custom_tests
 ```
 
 ## Dependency Visualization
@@ -202,6 +220,38 @@ project/
 
 ## Configuration
 
+### Configurable Directories
+
+By default, pytest-delta searches for source files in the project root (`.`) and `src/` directories, and test files in the `tests/` directory. You can customize these locations:
+
+```bash
+# Use custom source directories
+pytest --delta --delta-source-dirs lib --delta-source-dirs modules
+
+# Use custom test directories  
+pytest --delta --delta-test-dirs unit_tests --delta-test-dirs integration_tests
+
+# Combine both for complex project layouts
+pytest --delta --delta-source-dirs src --delta-source-dirs lib --delta-test-dirs tests --delta-test-dirs e2e
+```
+
+This is useful for projects with non-standard layouts or when you want to exclude certain directories from analysis.
+
+### Debug Information
+
+Use `--delta-debug` to get detailed information about the plugin's behavior:
+
+```bash
+pytest --delta --delta-debug
+```
+
+This will show you:
+- Which directories are being searched
+- What files were found and analyzed  
+- Which files changed since the last run
+- How the dependency graph was built
+- Which tests were selected and why
+
 ### Ignoring Files
 
 The `--delta-ignore` option allows you to exclude certain files from dependency analysis. This is useful for:
@@ -232,10 +282,13 @@ pytest --delta --delta-ignore "tests/integration/*" --delta-ignore "tests/e2e/*"
 
 The plugin requires no configuration for basic usage. It automatically:
 
-- Finds Python files in `src/` and `tests/` directories
+- Finds Python files in the current directory (`.`) and `src/` directories by default
+- Searches for test files in the `tests/` directory by default  
 - Excludes virtual environments, `__pycache__`, and other irrelevant directories
 - Creates dependency graphs based on import statements
 - Maps test files to source files using naming conventions
+
+You can override the default directories using `--delta-source-dirs` and `--delta-test-dirs` options to customize the search paths for your specific project layout.
 
 ## Error Handling
 
