@@ -785,6 +785,93 @@ class TestDeltaPlugin:
 
         mock_print.assert_not_called()
 
+    def test_directory_debug_info_collection(self):
+        """Test that directory debug information is collected correctly."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            (src_dir / "module1.py").write_text("# test")
+            (src_dir / "module2.py").write_text("# test")
+            
+            tests_dir = temp_path / "tests"
+            tests_dir.mkdir()
+            (tests_dir / "test_module1.py").write_text("# test")
+            
+            # Create analyzer with ignore patterns
+            analyzer = DependencyAnalyzer(
+                temp_path, 
+                ignore_patterns=["test_*"],
+                source_dirs=[".", "src", "nonexistent"],
+                test_dirs=["tests", "missing"]
+            )
+            
+            # Trigger file finding to populate debug info
+            python_files = analyzer._find_python_files()
+            
+            # Get debug info
+            debug_info = analyzer.get_debug_info()
+            
+            # Validate debug info structure
+            assert "configured_source_dirs" in debug_info
+            assert "configured_test_dirs" in debug_info
+            assert "searched_dirs" in debug_info
+            assert "skipped_dirs" in debug_info
+            assert "directory_file_counts" in debug_info
+            assert "ignored_files" in debug_info
+            
+            # Validate configured directories
+            assert debug_info["configured_source_dirs"] == [".", "src", "nonexistent"]
+            assert debug_info["configured_test_dirs"] == ["tests", "missing"]
+            
+            # Validate searched vs skipped directories
+            assert "src" in debug_info["searched_dirs"]
+            assert "tests" in debug_info["searched_dirs"] 
+            assert "nonexistent" in debug_info["skipped_dirs"]
+            assert "missing" in debug_info["skipped_dirs"]
+            
+            # Validate file counts
+            assert debug_info["directory_file_counts"]["src"] == 2
+            assert debug_info["directory_file_counts"]["tests"] == 1
+            
+            # Validate ignored files
+            assert "tests/test_module1.py" in debug_info["ignored_files"]
+
+    @patch("builtins.print")
+    def test_directory_debug_print_output(self, mock_print):
+        """Test that directory debug information is printed correctly."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            (src_dir / "module1.py").write_text("# test")
+            
+            analyzer = DependencyAnalyzer(
+                temp_path, 
+                ignore_patterns=["*.backup"],
+                source_dirs=["src"],
+                test_dirs=["tests"]
+            )
+            
+            # Trigger file finding
+            python_files = analyzer._find_python_files()
+            
+            # Print debug info
+            analyzer.print_directory_debug_info(lambda msg: print(msg))
+            
+            # Verify print was called with expected content
+            printed_output = "\n".join(call.args[0] for call in mock_print.call_args_list)
+            
+            assert "=== Directory Search Debug Information ===" in printed_output
+            assert "Configured source directories: ['src']" in printed_output
+            assert "Configured test directories: ['tests']" in printed_output
+            assert "User ignore patterns: ['*.backup']" in printed_output
+            assert "Files found per directory:" in printed_output
+
     def test_debug_flag_registers_plugin(self):
         """Test that debug flag alone registers the plugin."""
         from pytest_delta.plugin import pytest_configure
