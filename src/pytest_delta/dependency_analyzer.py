@@ -67,45 +67,55 @@ class DependencyAnalyzer:
     def print_directory_debug_info(self, print_func) -> None:
         """Print detailed directory search debug information."""
         debug_info = self._debug_info
-        
+
         print_func("=== Directory Search Debug Information ===")
-        
+
         # Configured directories
         print_func(f"Configured source directories: {debug_info['configured_source_dirs']}")
         print_func(f"Configured test directories: {debug_info['configured_test_dirs']}")
-        
+
         # Directories actually searched
         if debug_info["searched_dirs"]:
-            print_func(f"Directories searched ({len(debug_info['searched_dirs'])}): {', '.join(debug_info['searched_dirs'])}")
+            print_func(
+                f"Directories searched ({len(debug_info['searched_dirs'])}): {', '.join(debug_info['searched_dirs'])}"
+            )
         else:
             print_func("Directories searched: None")
-        
+
         # Directories skipped (don't exist)
         if debug_info["skipped_dirs"]:
-            print_func(f"Directories skipped (not found) ({len(debug_info['skipped_dirs'])}): {', '.join(debug_info['skipped_dirs'])}")
-        
+            print_func(
+                f"Directories skipped (not found) ({len(debug_info['skipped_dirs'])}): {', '.join(debug_info['skipped_dirs'])}"
+            )
+
         # File counts per directory
         if debug_info["directory_file_counts"]:
             print_func("Files found per directory:")
             for dir_name, count in sorted(debug_info["directory_file_counts"].items()):
                 print_func(f"  {dir_name}: {count} files")
-        
+
         # Excluded files (by built-in patterns)
         if debug_info["excluded_files"]:
-            excluded_summary = f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
+            excluded_summary = (
+                f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
+            )
             if len(debug_info["excluded_files"]) <= 5:
                 print_func(f"{excluded_summary}: {', '.join(debug_info['excluded_files'])}")
             else:
-                print_func(f"{excluded_summary} (showing first 5): {', '.join(debug_info['excluded_files'][:5])}")
-        
+                print_func(
+                    f"{excluded_summary} (showing first 5): {', '.join(debug_info['excluded_files'][:5])}"
+                )
+
         # Ignored files (by user patterns)
         if debug_info["ignored_files"]:
             ignored_summary = f"{len(debug_info['ignored_files'])} files ignored by user patterns"
             if len(debug_info["ignored_files"]) <= 5:
                 print_func(f"{ignored_summary}: {', '.join(debug_info['ignored_files'])}")
             else:
-                print_func(f"{ignored_summary} (showing first 5): {', '.join(debug_info['ignored_files'][:5])}")
-        
+                print_func(
+                    f"{ignored_summary} (showing first 5): {', '.join(debug_info['ignored_files'][:5])}"
+                )
+
         # User ignore patterns (if any)
         if self.ignore_patterns:
             print_func(f"User ignore patterns: {self.ignore_patterns}")
@@ -157,13 +167,15 @@ class DependencyAnalyzer:
         python_files = set()
 
         # Reset debug info for this search
-        self._debug_info.update({
-            "searched_dirs": [],
-            "skipped_dirs": [],
-            "excluded_files": [],
-            "ignored_files": [],
-            "directory_file_counts": {},
-        })
+        self._debug_info.update(
+            {
+                "searched_dirs": [],
+                "skipped_dirs": [],
+                "excluded_files": [],
+                "ignored_files": [],
+                "directory_file_counts": {},
+            }
+        )
 
         # Search in configured source and test directories
         search_dirs = []
@@ -176,7 +188,7 @@ class DependencyAnalyzer:
             if search_dir.is_dir():
                 self._debug_info["searched_dirs"].append(str(search_dir.relative_to(self.root_dir)))
                 files_found_in_dir = 0
-                
+
                 # If search_dir is the root directory, only get .py files directly in root (not recursive)
                 if search_dir == self.root_dir:
                     for file_path in search_dir.glob("*.py"):
@@ -188,9 +200,13 @@ class DependencyAnalyzer:
                     found_files = set(search_dir.rglob("*.py"))
                     python_files.update(found_files)
                     files_found_in_dir = len(found_files)
-                
+
                 # Store directory file count
-                dir_name = str(search_dir.relative_to(self.root_dir)) if search_dir != self.root_dir else "."
+                dir_name = (
+                    str(search_dir.relative_to(self.root_dir))
+                    if search_dir != self.root_dir
+                    else "."
+                )
                 self._debug_info["directory_file_counts"][dir_name] = files_found_in_dir
             else:
                 # Directory doesn't exist or isn't a directory
@@ -207,9 +223,6 @@ class DependencyAnalyzer:
             ".pytest_cache",
         ]
 
-        # Count total files before filtering
-        total_python_files = len(python_files)
-
         for file_path in python_files:
             path_str = str(file_path)
             relative_path_str = str(file_path.relative_to(self.root_dir))
@@ -221,7 +234,7 @@ class DependencyAnalyzer:
                     self._debug_info["excluded_files"].append(relative_path_str)
                     excluded = True
                     break
-            
+
             if excluded:
                 continue
 
