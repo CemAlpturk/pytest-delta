@@ -907,6 +907,192 @@ def test_pytest_integration():
     assert hasattr(plugin, "DeltaPlugin")
 
 
+class TestDeltaPassIfNoTests:
+    """Test cases for --delta-pass-if-no-tests functionality."""
+
+    def _create_mock_config(self, **overrides):
+        """Helper to create mock config with default values."""
+        defaults = {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-pass-if-no-tests": False,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }
+        defaults.update(overrides)
+        
+        config = Mock()
+        config.getoption.side_effect = lambda opt: defaults.get(opt, False)
+        return config
+
+    @patch("pytest_delta.plugin.Repo")
+    def test_pass_if_no_tests_option_initialization(self, mock_repo):
+        """Test that --delta-pass-if-no-tests option is properly initialized."""
+        config = self._create_mock_config(**{"--delta-pass-if-no-tests": True})
+        plugin = DeltaPlugin(config)
+        assert plugin.pass_if_no_tests is True
+
+    @patch("pytest_delta.plugin.Repo")
+    def test_pass_if_no_tests_default_false(self, mock_repo):
+        """Test that --delta-pass-if-no-tests defaults to False."""
+        config = self._create_mock_config()
+        plugin = DeltaPlugin(config)
+        assert plugin.pass_if_no_tests is False
+
+    @patch("pytest_delta.plugin.Repo")
+    def test_no_tests_due_to_delta_tracking(self, mock_repo):
+        """Test that no_tests_due_to_delta is set correctly when items are cleared."""
+        # Mock git repository
+        mock_repo_instance = Mock()
+        mock_repo.return_value = mock_repo_instance
+        
+        config = self._create_mock_config(**{
+            "--delta": True,
+            "--delta-pass-if-no-tests": True,
+        })
+
+        plugin = DeltaPlugin(config)
+        
+        # Mock the delta file and metadata loading using a different approach
+        with patch('pathlib.Path.exists', return_value=True), \
+             patch.object(plugin.delta_manager, 'load_metadata', return_value={'last_commit': 'abc123'}), \
+             patch.object(plugin, '_get_changed_files', return_value=set()):
+            
+            # Create mock test items
+            mock_items = [Mock(), Mock()]
+            
+            # Call the method that should clear items
+            plugin.pytest_collection_modifyitems(config, mock_items)
+            
+            # Verify that items were cleared and flag was set
+            assert len(mock_items) == 0
+            assert plugin.no_tests_due_to_delta is True
+
+    def test_session_finish_exit_code_override(self):
+        """Test that pytest_sessionfinish overrides exit code when appropriate."""
+        config = self._create_mock_config(**{"--delta-pass-if-no-tests": True})
+
+        plugin = DeltaPlugin(config)
+        plugin.pass_if_no_tests = True
+        plugin.no_tests_due_to_delta = True
+
+        # Mock session object
+        session = Mock()
+        session.testscollected = 0
+        session.exitstatus = 5  # This will be modified
+
+        # Call pytest_sessionfinish
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+
+        # Verify exit code was overridden
+        assert session.exitstatus == pytest.ExitCode.OK
+
+    def test_session_finish_no_override_when_flag_disabled(self):
+        """Test that pytest_sessionfinish doesn't override when flag is disabled."""
+        config = self._create_mock_config(**{"--delta-pass-if-no-tests": False})
+
+        plugin = DeltaPlugin(config)
+        plugin.pass_if_no_tests = False
+        plugin.no_tests_due_to_delta = True
+
+        # Mock session object
+        session = Mock()
+        session.testscollected = 0
+        session.exitstatus = 5  # Should remain unchanged
+
+        # Call pytest_sessionfinish
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+
+        # Verify exit code was NOT overridden
+        assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+
+    def test_session_finish_no_override_when_not_due_to_delta(self):
+        """Test that pytest_sessionfinish doesn't override when no tests isn't due to delta."""
+        config = self._create_mock_config(**{"--delta-pass-if-no-tests": True})
+
+        plugin = DeltaPlugin(config)
+        plugin.pass_if_no_tests = True
+        plugin.no_tests_due_to_delta = False  # Not due to delta analysis
+
+        # Mock session object
+        session = Mock()
+        session.testscollected = 0
+        session.exitstatus = 5  # Should remain unchanged
+
+        # Call pytest_sessionfinish
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+
+        # Verify exit code was NOT overridden
+        assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+
+    def test_session_finish_no_override_when_tests_were_collected(self):
+        """Test that pytest_sessionfinish doesn't override when tests were actually collected."""
+        config = self._create_mock_config(**{"--delta-pass-if-no-tests": True})
+
+        plugin = DeltaPlugin(config)
+        plugin.pass_if_no_tests = True
+        plugin.no_tests_due_to_delta = True
+
+        # Mock session object with tests collected
+        session = Mock()
+        session.testscollected = 5  # Tests were collected
+        session.exitstatus = 5
+
+        # Call pytest_sessionfinish
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+
+        # Verify exit code was NOT overridden
+        assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+
+    def test_session_finish_no_override_wrong_exit_code(self):
+        """Test that pytest_sessionfinish doesn't override for different exit codes."""
+        config = self._create_mock_config(**{"--delta-pass-if-no-tests": True})
+
+        plugin = DeltaPlugin(config)
+        plugin.pass_if_no_tests = True
+        plugin.no_tests_due_to_delta = True
+
+        # Mock session object
+        session = Mock()
+        session.testscollected = 0
+        session.exitstatus = 1  # Different exit code (tests failed)
+
+        # Call pytest_sessionfinish
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.TESTS_FAILED)
+
+        # Verify exit code was NOT overridden
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+
+    @patch("builtins.print")
+    def test_session_finish_prints_info_message(self, mock_print):
+        """Test that success message is printed when exit code is overridden."""
+        config = self._create_mock_config(**{"--delta-pass-if-no-tests": True})
+
+        plugin = DeltaPlugin(config)
+        plugin.pass_if_no_tests = True
+        plugin.no_tests_due_to_delta = True
+
+        # Mock session object
+        session = Mock()
+        session.testscollected = 0
+        session.exitstatus = 5
+
+        # Call pytest_sessionfinish
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+
+        # Verify success message was printed
+        printed_messages = [call.args[0] for call in mock_print.call_args_list]
+        success_message_printed = any(
+            "No tests were required due to no changes - exiting with success code 0" in msg
+            for msg in printed_messages
+        )
+        assert success_message_printed
+
+
 class TestDependencyVisualizer:
     """Test cases for DependencyVisualizer."""
 

@@ -74,6 +74,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Display detailed debug information about changed files, affected files, and selected tests",
     )
+    group.addoption(
+        "--delta-pass-if-no-tests",
+        action="store_true",
+        default=False,
+        help="Exit with code 0 (success) instead of 5 when no tests need to be run due to no changes",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -104,6 +110,7 @@ class DeltaPlugin:
         self.ignore_patterns = config.getoption("--delta-ignore")
         self.enable_visualization = config.getoption("--delta-vis")
         self.debug = config.getoption("--delta-debug")
+        self.pass_if_no_tests = config.getoption("--delta-pass-if-no-tests")
 
         # Get configurable directories with backwards compatible defaults
         self.source_dirs = config.getoption("--delta-source-dirs") or [".", "src"]
@@ -125,6 +132,9 @@ class DeltaPlugin:
         # Debug information storage
         self.changed_source_files: Set[Path] = set()
         self.all_changed_files: Set[Path] = set()
+        
+        # Track if no tests were run due to delta analysis
+        self.no_tests_due_to_delta = False
 
     def pytest_collection_modifyitems(
         self, config: pytest.Config, items: List[pytest.Item]
@@ -151,6 +161,7 @@ class DeltaPlugin:
                 # No changes detected, skip all tests
                 self._print_info("No changes detected, skipping all tests")
                 items.clear()
+                self.no_tests_due_to_delta = True
                 return
 
             # Filter tests based on affected files
@@ -180,6 +191,18 @@ class DeltaPlugin:
 
     def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
         """Update delta metadata after test session completion."""
+        # Handle exit code override for no tests scenario
+        if (
+            self.pass_if_no_tests
+            and self.no_tests_due_to_delta
+            and session.testscollected == 0
+            and exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+        ):
+            session.exitstatus = pytest.ExitCode.OK
+            self._print_info(
+                "No tests were required due to no changes - exiting with success code 0"
+            )
+
         if exitstatus == 0:  # Tests passed successfully
             try:
                 self.delta_manager.update_metadata(self.root_dir)
