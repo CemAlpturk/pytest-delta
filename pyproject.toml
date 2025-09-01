@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pytest-delta"
-version = "0.2.2"
+version = "0.2.3"
 description = "Run only tests impacted by your code changes (delta-based selection) for pytest."
 authors = ["Cem Alptürk <cem.alpturk@gmail.com>"]
 license = "MIT"
