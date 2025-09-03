@@ -178,7 +178,7 @@ class DeltaPlugin:
                     str(f.relative_to(self.root_dir))
                     for f in sorted(self.affected_files)
                 )
-                self._print_info(f"Affected files: {affected_files_str}")
+                self._print_debug(f"Affected files: {affected_files_str}")
 
             # Debug information
             if self.debug:
