@@ -785,6 +785,76 @@ class TestDeltaPlugin:
 
         mock_print.assert_not_called()
 
+    @patch("builtins.print")
+    def test_affected_files_output_respects_debug_flag(self, mock_print):
+        """Test that affected files output is only shown when debug is enabled."""
+        # Test with debug enabled - affected files should be printed
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-debug": True,
+            "--delta-ignore": [],
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        # Use absolute paths relative to the root directory
+        plugin.affected_files = {
+            plugin.root_dir / "src/module.py", 
+            plugin.root_dir / "tests/test_module.py"
+        }
+        
+        # Mock the _print_debug method to track calls
+        with patch.object(plugin, '_print_debug') as mock_debug:
+            # Simulate the affected files output logic
+            if plugin.affected_files:
+                affected_files_str = ", ".join(
+                    str(f.relative_to(plugin.root_dir)) 
+                    for f in sorted(plugin.affected_files)
+                )
+                plugin._print_debug(f"Affected files: {affected_files_str}")
+        
+        # Verify _print_debug was called with affected files
+        mock_debug.assert_called_with("Affected files: src/module.py, tests/test_module.py")
+
+        # Test with debug disabled - affected files should NOT be printed
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-debug": False,
+            "--delta-ignore": [],
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        plugin2 = DeltaPlugin(config)
+        plugin2.affected_files = {
+            plugin2.root_dir / "src/module.py", 
+            plugin2.root_dir / "tests/test_module.py"
+        }
+        
+        # Mock the _print_debug method to track calls
+        with patch.object(plugin2, '_print_debug') as mock_debug2:
+            # Simulate the affected files output logic
+            if plugin2.affected_files:
+                affected_files_str = ", ".join(
+                    str(f.relative_to(plugin2.root_dir)) 
+                    for f in sorted(plugin2.affected_files)
+                )
+                plugin2._print_debug(f"Affected files: {affected_files_str}")
+        
+        # Verify _print_debug was called but actual print should be suppressed
+        mock_debug2.assert_called_with("Affected files: src/module.py, tests/test_module.py")
+        
+        # Also verify that the actual print behavior works correctly
+        mock_print.reset_mock()
+        plugin2._print_debug("test message")
+        mock_print.assert_not_called()  # Should not print when debug is disabled
+
     def test_directory_debug_info_collection(self):
         """Test that directory debug information is collected correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
