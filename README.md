@@ -53,6 +53,8 @@ On first run, it will execute all tests and create a `.delta.json` file with met
 - `--delta-source-dirs PATH`: Source directories to search for Python files (default: project root and `src/`). Can be used multiple times.
 - `--delta-test-dirs PATH`: Test directories to search for test files (default: `tests`). Can be used multiple times.
 - `--delta-debug`: Display detailed debug information about changed files, affected files, and selected tests
+- `--delta-pass-if-no-tests`: Exit with code 0 (success) instead of 5 when no tests need to be run due to no changes
+- `--delta-no-save`: Skip updating the delta file after tests complete (read-only mode for CI/CD)
 
 ### Examples
 
@@ -104,6 +106,9 @@ pytest --delta --delta-debug
 
 # Debug with custom directories
 pytest --delta --delta-debug --delta-source-dirs custom_src --delta-test-dirs custom_tests
+
+# Read-only mode for CI/CD (use existing delta file but don't update it)
+pytest --delta --delta-no-save
 ```
 
 ## Dependency Visualization
