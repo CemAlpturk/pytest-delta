@@ -803,20 +803,19 @@ class TestDeltaPlugin:
         plugin = DeltaPlugin(config)
         # Use absolute paths relative to the root directory
         plugin.affected_files = {
-            plugin.root_dir / "src/module.py", 
-            plugin.root_dir / "tests/test_module.py"
+            plugin.root_dir / "src/module.py",
+            plugin.root_dir / "tests/test_module.py",
         }
-        
+
         # Mock the _print_debug method to track calls
-        with patch.object(plugin, '_print_debug') as mock_debug:
+        with patch.object(plugin, "_print_debug") as mock_debug:
             # Simulate the affected files output logic
             if plugin.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin.root_dir)) 
-                    for f in sorted(plugin.affected_files)
+                    str(f.relative_to(plugin.root_dir)) for f in sorted(plugin.affected_files)
                 )
                 plugin._print_debug(f"Affected files: {affected_files_str}")
-        
+
         # Verify _print_debug was called with affected files
         mock_debug.assert_called_with("Affected files: src/module.py, tests/test_module.py")
 
@@ -833,23 +832,22 @@ class TestDeltaPlugin:
 
         plugin2 = DeltaPlugin(config)
         plugin2.affected_files = {
-            plugin2.root_dir / "src/module.py", 
-            plugin2.root_dir / "tests/test_module.py"
+            plugin2.root_dir / "src/module.py",
+            plugin2.root_dir / "tests/test_module.py",
         }
-        
+
         # Mock the _print_debug method to track calls
-        with patch.object(plugin2, '_print_debug') as mock_debug2:
+        with patch.object(plugin2, "_print_debug") as mock_debug2:
             # Simulate the affected files output logic
             if plugin2.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin2.root_dir)) 
-                    for f in sorted(plugin2.affected_files)
+                    str(f.relative_to(plugin2.root_dir)) for f in sorted(plugin2.affected_files)
                 )
                 plugin2._print_debug(f"Affected files: {affected_files_str}")
-        
+
         # Verify _print_debug was called but actual print should be suppressed
         mock_debug2.assert_called_with("Affected files: src/module.py, tests/test_module.py")
-        
+
         # Also verify that the actual print behavior works correctly
         mock_print.reset_mock()
         plugin2._print_debug("test message")
@@ -994,7 +992,7 @@ class TestDeltaPassIfNoTests:
             "--delta-test-dirs": [],
         }
         defaults.update(overrides)
-        
+
         config = Mock()
         config.getoption.side_effect = lambda opt: defaults.get(opt, False)
         return config
@@ -1019,25 +1017,30 @@ class TestDeltaPassIfNoTests:
         # Mock git repository
         mock_repo_instance = Mock()
         mock_repo.return_value = mock_repo_instance
-        
-        config = self._create_mock_config(**{
-            "--delta": True,
-            "--delta-pass-if-no-tests": True,
-        })
+
+        config = self._create_mock_config(
+            **{
+                "--delta": True,
+                "--delta-pass-if-no-tests": True,
+            }
+        )
 
         plugin = DeltaPlugin(config)
-        
+
         # Mock the delta file and metadata loading using a different approach
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch.object(plugin.delta_manager, 'load_metadata', return_value={'last_commit': 'abc123'}), \
-             patch.object(plugin, '_get_changed_files', return_value=set()):
-            
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch.object(
+                plugin.delta_manager, "load_metadata", return_value={"last_commit": "abc123"}
+            ),
+            patch.object(plugin, "_get_changed_files", return_value=set()),
+        ):
             # Create mock test items
             mock_items = [Mock(), Mock()]
-            
+
             # Call the method that should clear items
             plugin.pytest_collection_modifyitems(config, mock_items)
-            
+
             # Verify that items were cleared and flag was set
             assert len(mock_items) == 0
             assert plugin.no_tests_due_to_delta is True
@@ -1273,6 +1276,152 @@ class TestDependencyVisualizer:
             assert "📊 Dependency Graph Visualization" in console_output
             assert "Files: 1" in console_output
             assert "Dependencies: 0" in console_output
+
+
+class TestDeltaNoSave:
+    """Test cases for --delta-no-save functionality."""
+
+    def test_no_save_option_initialization(self):
+        """Test that --delta-no-save option is properly initialized."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": True,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        assert plugin.no_save is True
+
+        # Test default behavior (no_save should be False by default)
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": False,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        plugin2 = DeltaPlugin(config)
+        assert plugin2.no_save is False
+
+    @patch("pytest_delta.plugin.Repo")
+    @patch("builtins.print")
+    def test_session_finish_no_save_enabled(self, mock_print, mock_repo):
+        """Test that delta metadata is not updated when --delta-no-save is enabled."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": True,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        plugin.delta_manager = Mock()
+
+        session = Mock()
+        session.testscollected = 1
+
+        # Call pytest_sessionfinish with successful exit status
+        plugin.pytest_sessionfinish(session, exitstatus=0)
+
+        # Verify that update_metadata was not called
+        plugin.delta_manager.update_metadata.assert_not_called()
+
+        # Verify the correct message was printed
+        mock_print.assert_any_call(
+            "[pytest-delta] Delta metadata update skipped (--delta-no-save enabled)"
+        )
+
+    @patch("pytest_delta.plugin.Repo")
+    @patch("builtins.print")
+    def test_session_finish_no_save_disabled(self, mock_print, mock_repo):
+        """Test that delta metadata is updated when --delta-no-save is disabled."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": False,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        plugin.delta_manager = Mock()
+
+        session = Mock()
+        session.testscollected = 1
+
+        # Call pytest_sessionfinish with successful exit status
+        plugin.pytest_sessionfinish(session, exitstatus=0)
+
+        # Verify that update_metadata was called
+        plugin.delta_manager.update_metadata.assert_called_once()
+
+        # Verify the correct message was printed
+        mock_print.assert_any_call("[pytest-delta] Delta metadata updated successfully")
+
+    @patch("pytest_delta.plugin.Repo")
+    @patch("builtins.print")
+    def test_session_finish_no_save_with_failed_tests(self, mock_print, mock_repo):
+        """Test that no update occurs when tests fail, regardless of --delta-no-save setting."""
+        config = Mock()
+        config.getoption.side_effect = lambda opt: {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": True,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        plugin = DeltaPlugin(config)
+        plugin.delta_manager = Mock()
+
+        session = Mock()
+        session.testscollected = 1
+
+        # Call pytest_sessionfinish with failed exit status
+        plugin.pytest_sessionfinish(session, exitstatus=1)
+
+        # Verify that update_metadata was not called (because tests failed)
+        plugin.delta_manager.update_metadata.assert_not_called()
+
+        # No delta-related messages should be printed for failed tests
+        delta_calls = [
+            call
+            for call in mock_print.call_args_list
+            if call[0] and "[pytest-delta]" in str(call[0][0])
+        ]
+        assert len(delta_calls) == 0
 
 
 class TestDeltaPluginVisualization:
