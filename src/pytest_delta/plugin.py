@@ -80,6 +80,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Exit with code 0 (success) instead of 5 when no tests need to be run due to no changes",
     )
+    group.addoption(
+        "--delta-no-save",
+        action="store_true",
+        default=False,
+        help="Skip updating the delta file after tests complete (read-only mode for CI/CD)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -111,6 +117,7 @@ class DeltaPlugin:
         self.enable_visualization = config.getoption("--delta-vis")
         self.debug = config.getoption("--delta-debug")
         self.pass_if_no_tests = config.getoption("--delta-pass-if-no-tests")
+        self.no_save = config.getoption("--delta-no-save")
 
         # Get configurable directories with backwards compatible defaults
         self.source_dirs = config.getoption("--delta-source-dirs") or [".", "src"]
@@ -204,11 +211,14 @@ class DeltaPlugin:
             )
 
         if exitstatus == 0:  # Tests passed successfully
-            try:
-                self.delta_manager.update_metadata(self.root_dir)
-                self._print_info("Delta metadata updated successfully")
-            except Exception as e:
-                self._print_warning(f"Failed to update delta metadata: {e}")
+            if not self.no_save:
+                try:
+                    self.delta_manager.update_metadata(self.root_dir)
+                    self._print_info("Delta metadata updated successfully")
+                except Exception as e:
+                    self._print_warning(f"Failed to update delta metadata: {e}")
+            else:
+                self._print_info("Delta metadata update skipped (--delta-no-save enabled)")
 
     def _analyze_changes(self) -> None:
         """Analyze what files have changed and determine affected files."""
