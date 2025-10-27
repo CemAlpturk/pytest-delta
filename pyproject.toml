@@ -1,18 +1,22 @@
 [tool.poetry]
 name = "pytest-delta"
-version = "0.3.0"
+version = "0.4.0"
 description = "Run only tests impacted by your code changes (delta-based selection) for pytest."
 authors = ["Cem Alptürk <cem.alpturk@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 packages = [{ include = "pytest_delta", from = "src" }]
-keywords = ["pytest", "plugin", "selective", "impact", "test", "ci", "graph"]
+keywords = ["pytest", "plugin", "selective", "impact", "test", "ci", "graph", "performance", "incremental"]
 homepage = "https://github.com/CemAlpturk/pytest-delta"
 repository = "https://github.com/CemAlpturk/pytest-delta"
 classifiers = [
   "Framework :: Pytest",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
   "License :: OSI Approved :: MIT License",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Testing",
 ]
 
 [tool.poetry.dependencies]
