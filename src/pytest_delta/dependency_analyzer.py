@@ -7,12 +7,31 @@ and determines which files are affected by changes.
 
 import ast
 import fnmatch
+import hashlib
+import re
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 
 class DependencyAnalyzer:
     """Analyzes Python file dependencies based on imports."""
+
+    # Regex patterns for fast import detection
+    _IMPORT_REGEX = re.compile(
+        r"^\s*(?:from\s+([.\w]+)\s+)?import\s+(.+?)(?:\s+as\s+\w+)?(?:\s*[#\n]|$)",
+        re.MULTILINE,
+    )
+
+    # Patterns that indicate a file needs full AST parsing
+    _COMPLEX_PATTERNS = [
+        "try:",
+        "except",
+        "if __name__",
+        "exec(",
+        "eval(",
+        "__import__(",
+        "importlib",
+    ]
 
     def __init__(
         self,
@@ -25,8 +44,13 @@ class DependencyAnalyzer:
         self.ignore_patterns = ignore_patterns or []
         self.source_dirs = source_dirs or [".", "src"]
         self.test_dirs = test_dirs or ["tests"]
+
+        # Cache for file hashes and parsed dependencies
+        self._file_hash_cache: Dict[Path, str] = {}
+        self._dependency_cache: Dict[str, Set[Path]] = {}
+
         # Debug information storage
-        self._debug_info = {
+        self._debug_info: Dict[str, Any] = {
             "configured_source_dirs": self.source_dirs.copy(),
             "configured_test_dirs": self.test_dirs.copy(),
             "searched_dirs": [],
@@ -34,6 +58,15 @@ class DependencyAnalyzer:
             "excluded_files": [],
             "ignored_files": [],
             "directory_file_counts": {},
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "regex_fast_path": 0,
+            "ast_full_parse": 0,
+            "incremental_added_files": 0,
+            "incremental_removed_files": 0,
+            "incremental_modified_files": 0,
+            "incremental_reparsed_files": 0,
+            "incremental_reused_files": 0,
         }
 
     def build_dependency_graph(self) -> Dict[Path, Set[Path]]:
@@ -60,18 +93,322 @@ class DependencyAnalyzer:
 
         return dependency_graph
 
-    def get_debug_info(self) -> Dict:
+    def build_dependency_graph_incremental(
+        self,
+        previous_graph: Dict[Path, set[Path]],
+        previous_hashes: Dict[Path, str],
+    ) -> tuple[Dict[Path, set[Path]], set[Path], Dict[Path, str]]:
+        """
+        Build dependency graph incrementally by only reparsing changed files.
+
+        This method provides significant performance improvements when only a few files
+        have changed by:
+        1. Detecting which files have been added, removed, or modified
+        2. Only reparsing those files and files that depend on them
+        3. Reusing the previous graph for unchanged files
+
+        Args:
+            previous_graph: Previously computed dependency graph
+            previous_hashes: File hashes from when previous_graph was built
+
+        Returns:
+            Tuple of (new_dependency_graph, reparsed_files_set, new_file_hashes)
+        """
+        # Find current files
+        source_files = self._find_source_files()
+        test_files = self._find_test_files()
+        all_files = source_files | test_files
+        all_python_files = self._find_python_files()
+
+        # Track what changed
+        current_hashes = {}
+        changed_files = set()
+        added_files = set()
+        removed_files = set()
+
+        # Compute current hashes and detect changes
+        for file_path in all_files:
+            current_hash = self._get_file_hash(file_path)
+            if current_hash is None:
+                continue
+
+            current_hashes[file_path] = current_hash
+
+            if file_path not in previous_hashes:
+                # New file
+                added_files.add(file_path)
+                changed_files.add(file_path)
+            elif previous_hashes[file_path] != current_hash:
+                # Modified file
+                changed_files.add(file_path)
+
+        # Detect removed files
+        for file_path in previous_hashes:
+            if file_path not in all_files:
+                removed_files.add(file_path)
+
+        # Build reverse dependency graph to find affected files
+        reverse_deps = self._build_reverse_dependency_graph(previous_graph)
+
+        # Find all files that need reparsing:
+        # 1. Changed files themselves
+        # 2. Files that import changed files (direct dependents)
+        # 3. Files that transitively depend on changed files
+        files_to_reparse = set(changed_files)
+
+        # Add direct and transitive dependents of changed files
+        to_process = list(changed_files)
+        processed = set()
+
+        while to_process:
+            current_file = to_process.pop(0)
+            if current_file in processed:
+                continue
+            processed.add(current_file)
+
+            # Find files that depend on the current file
+            dependents = reverse_deps.get(current_file, set())
+            for dependent in dependents:
+                if dependent in all_files and dependent not in processed:
+                    files_to_reparse.add(dependent)
+                    to_process.append(dependent)
+
+        # Build new graph incrementally
+        new_graph = {}
+
+        # Copy unchanged files from previous graph
+        for file_path in all_files:
+            if file_path not in files_to_reparse and file_path in previous_graph:
+                # File hasn't changed and doesn't depend on changed files
+                # Reuse dependencies from previous graph, but filter to current files
+                old_deps = previous_graph[file_path]
+                new_graph[file_path] = {dep for dep in old_deps if dep in all_files}
+
+        # Reparse changed files and their dependents
+        for file_path in files_to_reparse:
+            if file_path in all_files:  # Skip removed files
+                dependencies = self._extract_dependencies(file_path, all_python_files)
+                tracked_dependencies = {dep for dep in dependencies if dep in all_files}
+                new_graph[file_path] = tracked_dependencies
+
+        # Track statistics
+        self._debug_info["incremental_added_files"] = len(added_files)
+        self._debug_info["incremental_removed_files"] = len(removed_files)
+        self._debug_info["incremental_modified_files"] = len(
+            changed_files - added_files
+        )
+        self._debug_info["incremental_reparsed_files"] = len(files_to_reparse)
+        self._debug_info["incremental_reused_files"] = len(all_files) - len(
+            files_to_reparse
+        )
+
+        return new_graph, files_to_reparse, current_hashes
+
+    def get_debug_info(self) -> Dict[str, Any]:
         """Return debug information collected during analysis."""
         return self._debug_info.copy()
 
-    def print_directory_debug_info(self, print_func) -> None:
+    def _get_file_hash(self, file_path: Path) -> str | None:
+        """
+        Compute MD5 hash of file contents for caching purposes.
+
+        Args:
+            file_path: Path to the file to hash
+
+        Returns:
+            MD5 hash string, or None if file cannot be read
+        """
+        # Check if hash is already cached
+        if file_path in self._file_hash_cache:
+            return self._file_hash_cache[file_path]
+
+        try:
+            with open(file_path, "rb") as f:
+                content = f.read()
+                file_hash = hashlib.md5(content).hexdigest()
+                self._file_hash_cache[file_path] = file_hash
+                return file_hash
+        except (OSError, IOError):
+            return None
+
+    def _get_cached_dependencies(
+        self, file_path: Path, all_files: Set[Path]
+    ) -> Tuple[Set[Path], bool]:
+        """
+        Get dependencies from cache if file hasn't changed, otherwise parse the file.
+
+        Args:
+            file_path: Path to the file to analyze
+            all_files: Set of all files in the project
+
+        Returns:
+            Tuple of (dependencies set, cache_hit boolean)
+        """
+        file_hash = self._get_file_hash(file_path)
+        if file_hash is None:
+            return set(), False
+
+        # Create cache key combining file path and hash
+        cache_key = f"{file_path}:{file_hash}"
+
+        # Check if we have cached dependencies for this file hash
+        if cache_key in self._dependency_cache:
+            self._debug_info["cache_hits"] += 1
+            return self._dependency_cache[cache_key], True
+
+        # Cache miss - need to parse the file
+        self._debug_info["cache_misses"] += 1
+        dependencies = self._parse_file_dependencies(file_path, all_files)
+
+        # Store in cache
+        self._dependency_cache[cache_key] = dependencies
+
+        return dependencies, False
+
+    def _parse_file_dependencies(
+        self, file_path: Path, all_files: Set[Path]
+    ) -> Set[Path]:
+        """
+        Parse a Python file and extract its dependencies.
+        This is the actual parsing logic separated from caching.
+
+        Args:
+            file_path: Path to the file to parse
+            all_files: Set of all files in the project
+
+        Returns:
+            Set of file paths that this file depends on
+        """
+        dependencies: Set[Path] = set()
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except (OSError, UnicodeDecodeError):
+            # Skip files that can't be read
+            return dependencies
+
+        # Try fast path: regex-based import detection for simple files
+        if not self._has_complex_patterns(content):
+            module_names = self._quick_scan_imports(content)
+            if module_names is not None:
+                # Fast path succeeded
+                self._debug_info["regex_fast_path"] += 1
+                for module_name in module_names:
+                    dep_path = self._resolve_import_to_file(module_name, all_files)
+                    if dep_path:
+                        dependencies.add(dep_path)
+                return dependencies
+
+        # Fall back to full AST parsing for complex files
+        self._debug_info["ast_full_parse"] += 1
+
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            # Skip files with syntax errors
+            return dependencies
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    dep_path = self._resolve_import_to_file(alias.name, all_files)
+                    if dep_path:
+                        dependencies.add(dep_path)
+
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    # Handle relative imports
+                    resolved_module: str | None
+                    if node.level > 0:  # Relative import
+                        resolved_module = self._resolve_relative_import(
+                            file_path, node.module, node.level
+                        )
+                    else:
+                        resolved_module = node.module
+
+                    if resolved_module:
+                        dep_path = self._resolve_import_to_file(
+                            resolved_module, all_files
+                        )
+                        if dep_path:
+                            dependencies.add(dep_path)
+
+                # Also handle individual imports from modules
+                for alias in node.names:
+                    if node.module:
+                        full_name = f"{node.module}.{alias.name}"
+                    else:
+                        full_name = alias.name
+
+                    dep_path = self._resolve_import_to_file(full_name, all_files)
+                    if dep_path:
+                        dependencies.add(dep_path)
+
+        return dependencies
+
+    def _has_complex_patterns(self, content: str) -> bool:
+        """
+        Check if file content contains patterns that require full AST parsing.
+
+        Args:
+            content: File content to analyze
+
+        Returns:
+            True if file needs AST parsing, False if regex is sufficient
+        """
+        # Check for complex patterns that regex can't handle reliably
+        for pattern in self._COMPLEX_PATTERNS:
+            if pattern in content:
+                return True
+        return False
+
+    def _quick_scan_imports(self, content: str) -> Set[str] | None:
+        """
+        Fast regex-based import detection for simple files.
+
+        Returns a set of module names if successful, None if AST parsing is needed.
+
+        Args:
+            content: File content to scan
+
+        Returns:
+            Set of imported module names, or None if full AST parsing is required
+        """
+        # Check if this file needs full AST parsing
+        if self._has_complex_patterns(content):
+            return None
+
+        imports: Set[str] = set()
+
+        # Find all import statements using regex
+        for match in self._IMPORT_REGEX.finditer(content):
+            from_module = match.group(1)  # The module after 'from'
+            import_part = match.group(2)  # The module/names after 'import'
+
+            if from_module:
+                # from module import something
+                imports.add(from_module)
+            else:
+                # import module or import module, module2
+                # Split by comma and get the first module name
+                for item in import_part.split(","):
+                    module_name = item.strip().split()[0]  # Get name before 'as'
+                    if module_name:
+                        imports.add(module_name)
+
+        return imports
+
+    def print_directory_debug_info(self, print_func: Callable[[str], None]) -> None:
         """Print detailed directory search debug information."""
         debug_info = self._debug_info
 
         print_func("=== Directory Search Debug Information ===")
 
         # Configured directories
-        print_func(f"Configured source directories: {debug_info['configured_source_dirs']}")
+        print_func(
+            f"Configured source directories: {debug_info['configured_source_dirs']}"
+        )
         print_func(f"Configured test directories: {debug_info['configured_test_dirs']}")
 
         # Directories actually searched
@@ -96,11 +433,11 @@ class DependencyAnalyzer:
 
         # Excluded files (by built-in patterns)
         if debug_info["excluded_files"]:
-            excluded_summary = (
-                f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
-            )
+            excluded_summary = f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
             if len(debug_info["excluded_files"]) <= 5:
-                print_func(f"{excluded_summary}: {', '.join(debug_info['excluded_files'])}")
+                print_func(
+                    f"{excluded_summary}: {', '.join(debug_info['excluded_files'])}"
+                )
             else:
                 print_func(
                     f"{excluded_summary} (showing first 5): {', '.join(debug_info['excluded_files'][:5])}"
@@ -108,9 +445,13 @@ class DependencyAnalyzer:
 
         # Ignored files (by user patterns)
         if debug_info["ignored_files"]:
-            ignored_summary = f"{len(debug_info['ignored_files'])} files ignored by user patterns"
+            ignored_summary = (
+                f"{len(debug_info['ignored_files'])} files ignored by user patterns"
+            )
             if len(debug_info["ignored_files"]) <= 5:
-                print_func(f"{ignored_summary}: {', '.join(debug_info['ignored_files'])}")
+                print_func(
+                    f"{ignored_summary}: {', '.join(debug_info['ignored_files'])}"
+                )
             else:
                 print_func(
                     f"{ignored_summary} (showing first 5): {', '.join(debug_info['ignored_files'][:5])}"
@@ -119,6 +460,40 @@ class DependencyAnalyzer:
         # User ignore patterns (if any)
         if self.ignore_patterns:
             print_func(f"User ignore patterns: {self.ignore_patterns}")
+
+        # Cache statistics
+        total_cache_requests = debug_info["cache_hits"] + debug_info["cache_misses"]
+        if total_cache_requests > 0:
+            hit_rate = (debug_info["cache_hits"] / total_cache_requests) * 100
+            print_func(
+                f"Cache statistics: {debug_info['cache_hits']} hits, "
+                f"{debug_info['cache_misses']} misses ({hit_rate:.1f}% hit rate)"
+            )
+
+        # Parsing method statistics
+        total_parses = debug_info["regex_fast_path"] + debug_info["ast_full_parse"]
+        if total_parses > 0:
+            regex_rate = (debug_info["regex_fast_path"] / total_parses) * 100
+            print_func(
+                f"Parsing methods: {debug_info['regex_fast_path']} regex fast path, "
+                f"{debug_info['ast_full_parse']} AST full parse ({regex_rate:.1f}% fast path)"
+            )
+
+        # Incremental update statistics
+        total_reparsed = debug_info["incremental_reparsed_files"]
+        total_reused = debug_info["incremental_reused_files"]
+        if total_reparsed > 0 or total_reused > 0:
+            print_func("\n=== Incremental Update Statistics ===")
+            print_func(f"Added files: {debug_info['incremental_added_files']}")
+            print_func(f"Removed files: {debug_info['incremental_removed_files']}")
+            print_func(f"Modified files: {debug_info['incremental_modified_files']}")
+            print_func(f"Files reparsed: {total_reparsed}")
+            print_func(f"Files reused from cache: {total_reused}")
+
+            total_files = total_reparsed + total_reused
+            if total_files > 0:
+                reuse_rate = (total_reused / total_files) * 100
+                print_func(f"Cache reuse rate: {reuse_rate:.1f}%")
 
     def find_affected_files(
         self, changed_files: Set[Path], dependency_graph: Dict[Path, Set[Path]]
@@ -186,7 +561,9 @@ class DependencyAnalyzer:
 
         for search_dir in search_dirs:
             if search_dir.is_dir():
-                self._debug_info["searched_dirs"].append(str(search_dir.relative_to(self.root_dir)))
+                self._debug_info["searched_dirs"].append(
+                    str(search_dir.relative_to(self.root_dir))
+                )
                 files_found_in_dir = 0
 
                 # If search_dir is the root directory, only get .py files directly in root (not recursive)
@@ -210,7 +587,9 @@ class DependencyAnalyzer:
                 self._debug_info["directory_file_counts"][dir_name] = files_found_in_dir
             else:
                 # Directory doesn't exist or isn't a directory
-                self._debug_info["skipped_dirs"].append(str(search_dir.relative_to(self.root_dir)))
+                self._debug_info["skipped_dirs"].append(
+                    str(search_dir.relative_to(self.root_dir))
+                )
 
         # Filter out __pycache__, .venv, and other irrelevant files
         filtered_files = set()
@@ -334,58 +713,23 @@ class DependencyAnalyzer:
         return False
 
     def _extract_dependencies(self, file_path: Path, all_files: Set[Path]) -> Set[Path]:
-        """Extract dependencies (imports) from a Python file."""
-        dependencies = set()
+        """
+        Extract dependencies (imports) from a Python file.
+        Uses caching to avoid re-parsing unchanged files.
 
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except (OSError, UnicodeDecodeError):
-            # Skip files that can't be read
-            return dependencies
+        Args:
+            file_path: Path to the file to analyze
+            all_files: Set of all files in the project
 
-        try:
-            tree = ast.parse(content)
-        except SyntaxError:
-            # Skip files with syntax errors
-            return dependencies
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    dep_path = self._resolve_import_to_file(alias.name, all_files)
-                    if dep_path:
-                        dependencies.add(dep_path)
-
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    # Handle relative imports
-                    if node.level > 0:  # Relative import
-                        module_name = self._resolve_relative_import(
-                            file_path, node.module, node.level
-                        )
-                    else:
-                        module_name = node.module
-
-                    if module_name:
-                        dep_path = self._resolve_import_to_file(module_name, all_files)
-                        if dep_path:
-                            dependencies.add(dep_path)
-
-                # Also handle individual imports from modules
-                for alias in node.names:
-                    if node.module:
-                        full_name = f"{node.module}.{alias.name}"
-                    else:
-                        full_name = alias.name
-
-                    dep_path = self._resolve_import_to_file(full_name, all_files)
-                    if dep_path:
-                        dependencies.add(dep_path)
-
+        Returns:
+            Set of file paths that this file depends on
+        """
+        dependencies, _ = self._get_cached_dependencies(file_path, all_files)
         return dependencies
 
-    def _resolve_import_to_file(self, import_name: str, all_files: Set[Path]) -> Path | None:
+    def _resolve_import_to_file(
+        self, import_name: str, all_files: Set[Path]
+    ) -> Path | None:
         """Resolve an import name to an actual file path."""
         # Convert module name to potential file paths
         parts = import_name.split(".")
@@ -424,9 +768,9 @@ class DependencyAnalyzer:
                     file_relative = file_path.relative_to(self.root_dir)
                     # Check if the relative path matches the potential path exactly
                     # or if it's in a subdirectory structure that matches
-                    if str(file_relative) == str(potential_path) or str(file_relative).endswith(
-                        "/" + str(potential_path)
-                    ):
+                    if str(file_relative) == str(potential_path) or str(
+                        file_relative
+                    ).endswith("/" + str(potential_path)):
                         return file_path
                 except ValueError:
                     continue
@@ -455,7 +799,9 @@ class DependencyAnalyzer:
             return None
 
         base_parts = (
-            current_dir_parts[:-levels_to_go_up] if levels_to_go_up > 0 else current_dir_parts
+            current_dir_parts[:-levels_to_go_up]
+            if levels_to_go_up > 0
+            else current_dir_parts
         )
 
         if module_name:
@@ -470,7 +816,7 @@ class DependencyAnalyzer:
         self, dependency_graph: Dict[Path, Set[Path]]
     ) -> Dict[Path, Set[Path]]:
         """Build reverse dependency graph (who depends on whom)."""
-        reverse_deps = {}
+        reverse_deps: Dict[Path, Set[Path]] = {}
 
         for file_path, dependencies in dependency_graph.items():
             for dependency in dependencies:

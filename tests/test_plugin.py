@@ -185,8 +185,8 @@ class TestDeltaManager:
             # Should fall back to __init__.py
             assert version == "1.2.3"
 
-    @patch("pytest_delta.delta_manager.Repo")
-    def test_update_metadata_uses_detected_version(self, mock_repo):
+    @patch("pytest_delta.delta_manager.GitHelper")
+    def test_update_metadata_uses_detected_version(self, mock_git_helper):
         """Test that update_metadata uses detected project version."""
         with tempfile.TemporaryDirectory() as temp_dir:
             delta_file = Path(temp_dir) / ".delta.json"
@@ -197,10 +197,10 @@ class TestDeltaManager:
             with open(pyproject_path, "w") as f:
                 f.write('[tool.poetry]\nname = "test-project"\nversion = "1.2.3"')
 
-            # Mock successful repo with commit
-            mock_repo_instance = Mock()
-            mock_repo_instance.head.commit.hexsha = "abc123"
-            mock_repo.return_value = mock_repo_instance
+            # Mock successful git helper with commit
+            mock_git_instance = Mock()
+            mock_git_instance.get_current_commit.return_value = "abc123"
+            mock_git_helper.return_value = mock_git_instance
 
             root_dir = Path(temp_dir).resolve()
             manager.update_metadata(root_dir)
@@ -213,23 +213,25 @@ class TestDeltaManager:
             assert metadata["last_commit"] == "abc123"
             assert metadata["last_successful_run"] is True
 
-    @patch("pytest_delta.delta_manager.Repo")
-    def test_update_metadata_parent_git_search(self, mock_repo):
+    @patch("pytest_delta.delta_manager.GitHelper")
+    def test_update_metadata_parent_git_search(self, mock_git_helper):
         """Test that update_metadata uses search_parent_directories=True."""
         with tempfile.TemporaryDirectory() as temp_dir:
             delta_file = Path(temp_dir) / ".delta.json"
             manager = DeltaManager(delta_file)
 
-            # Mock successful repo with commit
-            mock_repo_instance = Mock()
-            mock_repo_instance.head.commit.hexsha = "abc123"
-            mock_repo.return_value = mock_repo_instance
+            # Mock successful git helper with commit
+            mock_git_instance = Mock()
+            mock_git_instance.get_current_commit.return_value = "abc123"
+            mock_git_helper.return_value = mock_git_instance
 
             root_dir = Path(temp_dir).resolve()
             manager.update_metadata(root_dir)
 
-            # Verify that Repo was called with search_parent_directories=True
-            mock_repo.assert_called_once_with(root_dir, search_parent_directories=True)
+            # Verify that GitHelper was called with search_parent_directories=True
+            mock_git_helper.assert_called_once_with(
+                root_dir, search_parent_directories=True
+            )
 
 
 class TestDependencyAnalyzer:
@@ -376,7 +378,9 @@ class TestDependencyAnalyzer:
 
             # Simulate a change to utils.py (the base module)
             changed_files = {utils_py}
-            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+            affected_files = analyzer.find_affected_files(
+                changed_files, dependency_graph
+            )
 
             # All files that import utils.py should be affected
             expected_affected = {
@@ -410,9 +414,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -452,14 +456,16 @@ class TestDependencyAnalyzer:
 
             # b.py should depend on a.py
             deps = analyzer._extract_dependencies(module_b, all_files)
-            assert module_a in deps, f"Expected a.py to be a dependency of b.py, but got: {deps}"
+            assert (
+                module_a in deps
+            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
 
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert module_a in dependency_graph[module_b], (
-                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
-            )
+            assert (
+                module_a in dependency_graph[module_b]
+            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -542,8 +548,8 @@ class TestDependencyAnalyzer:
 class TestDeltaPlugin:
     """Test cases for DeltaPlugin main functionality."""
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_plugin_initialization(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_plugin_initialization(self, mock_git_helper):
         """Test plugin initialization."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
@@ -558,8 +564,8 @@ class TestDeltaPlugin:
         assert plugin.force_regenerate is False
         assert not plugin.should_run_all
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_delta_file_path_construction(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_delta_file_path_construction(self, mock_git_helper):
         """Test delta file path construction from filename and directory."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
@@ -583,12 +589,12 @@ class TestDeltaPlugin:
         plugin2 = DeltaPlugin(config)
         assert plugin2.delta_file == Path("/custom/dir/my-delta.json")
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_no_git_repo_fallback(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_no_git_repo_fallback(self, mock_git_helper):
         """Test fallback when not in a Git repository."""
-        from git.exc import InvalidGitRepositoryError
+        from pytest_delta.git_helper import NotAGitRepositoryError
 
-        mock_repo.side_effect = InvalidGitRepositoryError("Not a git repo")
+        mock_git_helper.side_effect = NotAGitRepositoryError("Not a git repo")
 
         config = Mock()
         config.getoption.side_effect = lambda opt: {
@@ -602,13 +608,13 @@ class TestDeltaPlugin:
 
         assert plugin.should_run_all is True
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_non_root_git_repo_detection(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_non_root_git_repo_detection(self, mock_git_helper):
         """Test that git repository is detected even when .git is in parent directory."""
 
-        # Mock successful Repo creation to simulate finding git repo in parent
-        mock_repo_instance = Mock()
-        mock_repo.return_value = mock_repo_instance
+        # Mock successful GitHelper creation to simulate finding git repo in parent
+        mock_git_instance = Mock()
+        mock_git_helper.return_value = mock_git_instance
 
         config = Mock()
         config.getoption.side_effect = lambda opt: {
@@ -620,12 +626,14 @@ class TestDeltaPlugin:
         plugin = DeltaPlugin(config)
         plugin._analyze_changes()
 
-        # Verify that Repo was called with search_parent_directories=True
-        mock_repo.assert_called_with(plugin.root_dir, search_parent_directories=True)
+        # Verify that GitHelper was called with search_parent_directories=True
+        mock_git_helper.assert_called_with(
+            plugin.root_dir, search_parent_directories=True
+        )
 
         # Should not run all tests if git repo is found (but delta file doesn't exist)
         # In this case should_run_all will be True because delta file doesn't exist
-        # but the important thing is that no InvalidGitRepositoryError was raised
+        # but the important thing is that no NotAGitRepositoryError was raised
         assert plugin.should_run_all is True  # Due to missing delta file, not git error
 
     def test_separate_test_and_source_file_changes(self):
@@ -812,12 +820,15 @@ class TestDeltaPlugin:
             # Simulate the affected files output logic
             if plugin.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin.root_dir)) for f in sorted(plugin.affected_files)
+                    str(f.relative_to(plugin.root_dir))
+                    for f in sorted(plugin.affected_files)
                 )
                 plugin._print_debug(f"Affected files: {affected_files_str}")
 
         # Verify _print_debug was called with affected files
-        mock_debug.assert_called_with("Affected files: src/module.py, tests/test_module.py")
+        mock_debug.assert_called_with(
+            "Affected files: src/module.py, tests/test_module.py"
+        )
 
         # Test with debug disabled - affected files should NOT be printed
         config.getoption.side_effect = lambda opt: {
@@ -841,12 +852,15 @@ class TestDeltaPlugin:
             # Simulate the affected files output logic
             if plugin2.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin2.root_dir)) for f in sorted(plugin2.affected_files)
+                    str(f.relative_to(plugin2.root_dir))
+                    for f in sorted(plugin2.affected_files)
                 )
                 plugin2._print_debug(f"Affected files: {affected_files_str}")
 
         # Verify _print_debug was called but actual print should be suppressed
-        mock_debug2.assert_called_with("Affected files: src/module.py, tests/test_module.py")
+        mock_debug2.assert_called_with(
+            "Affected files: src/module.py, tests/test_module.py"
+        )
 
         # Also verify that the actual print behavior works correctly
         mock_print.reset_mock()
@@ -932,7 +946,9 @@ class TestDeltaPlugin:
             analyzer.print_directory_debug_info(lambda msg: print(msg))
 
             # Verify print was called with expected content
-            printed_output = "\n".join(call.args[0] for call in mock_print.call_args_list)
+            printed_output = "\n".join(
+                call.args[0] for call in mock_print.call_args_list
+            )
 
             assert "=== Directory Search Debug Information ===" in printed_output
             assert "Configured source directories: ['src']" in printed_output
@@ -997,26 +1013,26 @@ class TestDeltaPassIfNoTests:
         config.getoption.side_effect = lambda opt: defaults.get(opt, False)
         return config
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_pass_if_no_tests_option_initialization(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_pass_if_no_tests_option_initialization(self, mock_git_helper):
         """Test that --delta-pass-if-no-tests option is properly initialized."""
         config = self._create_mock_config(**{"--delta-pass-if-no-tests": True})
         plugin = DeltaPlugin(config)
         assert plugin.pass_if_no_tests is True
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_pass_if_no_tests_default_false(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_pass_if_no_tests_default_false(self, mock_git_helper):
         """Test that --delta-pass-if-no-tests defaults to False."""
         config = self._create_mock_config()
         plugin = DeltaPlugin(config)
         assert plugin.pass_if_no_tests is False
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_no_tests_due_to_delta_tracking(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_no_tests_due_to_delta_tracking(self, mock_git_helper):
         """Test that no_tests_due_to_delta is set correctly when items are cleared."""
         # Mock git repository
-        mock_repo_instance = Mock()
-        mock_repo.return_value = mock_repo_instance
+        mock_git_instance = Mock()
+        mock_git_helper.return_value = mock_git_instance
 
         config = self._create_mock_config(
             **{
@@ -1031,7 +1047,9 @@ class TestDeltaPassIfNoTests:
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch.object(
-                plugin.delta_manager, "load_metadata", return_value={"last_commit": "abc123"}
+                plugin.delta_manager,
+                "load_metadata",
+                return_value={"last_commit": "abc123"},
             ),
             patch.object(plugin, "_get_changed_files", return_value=set()),
         ):
@@ -1059,7 +1077,9 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5  # This will be modified
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was overridden
         assert session.exitstatus == pytest.ExitCode.OK
@@ -1078,7 +1098,9 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5  # Should remain unchanged
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1097,7 +1119,9 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5  # Should remain unchanged
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1116,7 +1140,9 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1155,12 +1181,15 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify success message was printed
         printed_messages = [call.args[0] for call in mock_print.call_args_list]
         success_message_printed = any(
-            "No tests were required due to no changes - exiting with success code 0" in msg
+            "No tests were required due to no changes - exiting with success code 0"
+            in msg
             for msg in printed_messages
         )
         assert success_message_printed
@@ -1317,7 +1346,7 @@ class TestDeltaNoSave:
         plugin2 = DeltaPlugin(config)
         assert plugin2.no_save is False
 
-    @patch("pytest_delta.plugin.Repo")
+    @patch("pytest_delta.plugin.GitHelper")
     @patch("builtins.print")
     def test_session_finish_no_save_enabled(self, mock_print, mock_repo):
         """Test that delta metadata is not updated when --delta-no-save is enabled."""
@@ -1352,7 +1381,7 @@ class TestDeltaNoSave:
             "[pytest-delta] Delta metadata update skipped (--delta-no-save enabled)"
         )
 
-    @patch("pytest_delta.plugin.Repo")
+    @patch("pytest_delta.plugin.GitHelper")
     @patch("builtins.print")
     def test_session_finish_no_save_disabled(self, mock_print, mock_repo):
         """Test that delta metadata is updated when --delta-no-save is disabled."""
@@ -1385,7 +1414,7 @@ class TestDeltaNoSave:
         # Verify the correct message was printed
         mock_print.assert_any_call("[pytest-delta] Delta metadata updated successfully")
 
-    @patch("pytest_delta.plugin.Repo")
+    @patch("pytest_delta.plugin.GitHelper")
     @patch("builtins.print")
     def test_session_finish_no_save_with_failed_tests(self, mock_print, mock_repo):
         """Test that no update occurs when tests fail, regardless of --delta-no-save setting."""
@@ -1427,8 +1456,8 @@ class TestDeltaNoSave:
 class TestDeltaPluginVisualization:
     """Test cases for DeltaPlugin visualization functionality."""
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_visualization_option_enabled(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_visualization_option_enabled(self, mock_git_helper):
         """Test plugin initialization with visualization enabled."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
@@ -1442,8 +1471,8 @@ class TestDeltaPluginVisualization:
         plugin = DeltaPlugin(config)
         assert plugin.enable_visualization is True
 
-    @patch("pytest_delta.plugin.Repo")
-    def test_visualization_option_disabled(self, mock_repo):
+    @patch("pytest_delta.plugin.GitHelper")
+    def test_visualization_option_disabled(self, mock_git_helper):
         """Test plugin initialization with visualization disabled."""
         config = Mock()
         config.getoption.side_effect = lambda opt: {
@@ -1509,7 +1538,9 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, test_dirs=["unit_tests", "integration_tests"]
+            )
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -1581,9 +1612,9 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
 
 class TestUnstagedChangesBugFix:
@@ -1608,7 +1639,9 @@ class TestUnstagedChangesBugFix:
             test_calculator_file = tests_dir / "test_calculator.py"
             test_calculator_file.write_text("from calculator import add")
 
-            analyzer = DependencyAnalyzer(temp_path, source_dirs=["src"], test_dirs=["tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, source_dirs=["src"], test_dirs=["tests"]
+            )
 
             all_files = {calculator_file, test_calculator_file}
 
@@ -1627,7 +1660,9 @@ class TestUnstagedChangesBugFix:
             # Initialize git repository
             repo = Repo.init(temp_path)
             repo.config_writer().set_value("user", "name", "Test User").release()
-            repo.config_writer().set_value("user", "email", "test@example.com").release()
+            repo.config_writer().set_value(
+                "user", "email", "test@example.com"
+            ).release()
 
             # Create project structure
             src_dir = temp_path / "src"
@@ -1661,7 +1696,9 @@ def test_add():
             # Make unstaged change to source file
             calculator_file.write_text("def add(x, y):\n    return x + y + 1\n")
 
-            analyzer = DependencyAnalyzer(temp_path, source_dirs=[".", "src"], test_dirs=["tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, source_dirs=[".", "src"], test_dirs=["tests"]
+            )
 
             # Build dependency graph
             dependency_graph = analyzer.build_dependency_graph()
@@ -1672,7 +1709,9 @@ def test_add():
 
             # When source file changes, test file should be affected
             changed_files = {calculator_file}
-            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+            affected_files = analyzer.find_affected_files(
+                changed_files, dependency_graph
+            )
 
             # Both source and test files should be affected
             assert calculator_file in affected_files

@@ -9,6 +9,7 @@ pytest-delta is a pytest plugin that reduces test execution time by running only
 ## Features
 
 - **Smart Test Selection**: Only runs tests affected by changed files
+- **High Performance**: Up to 47x faster with intelligent caching and incremental updates
 - **Dependency Tracking**: Creates a dependency graph based on Python imports
 - **Dependency Visualization**: Generate visual representations of project structure
 - **Git Integration**: Compares against the last successful test run commit
@@ -45,16 +46,16 @@ On first run, it will execute all tests and create a `.delta.json` file with met
 ### Command Line Options
 
 - `--delta`: Enable delta-based test selection
-- `--delta-filename NAME`: Specify filename for delta metadata file (default: `.delta`, `.json` extension added automatically)
+- `--delta-filename NAME`: Specify filename for delta metadata file (default: `.delta`)
 - `--delta-dir PATH`: Specify directory for delta metadata file (default: current directory)
 - `--delta-force`: Force regeneration of delta file and run all tests
 - `--delta-ignore PATTERN`: Ignore file patterns during dependency analysis (can be used multiple times)
 - `--delta-vis`: Generate a visual representation of the project's dependency graph
-- `--delta-source-dirs PATH`: Source directories to search for Python files (default: project root and `src/`). Can be used multiple times.
-- `--delta-test-dirs PATH`: Test directories to search for test files (default: `tests`). Can be used multiple times.
-- `--delta-debug`: Display detailed debug information about changed files, affected files, and selected tests
-- `--delta-pass-if-no-tests`: Exit with code 0 (success) instead of 5 when no tests need to be run due to no changes
-- `--delta-no-save`: Skip updating the delta file after tests complete (read-only mode for CI/CD)
+- `--delta-source-dirs PATH`: Source directories to search for Python files (default: `.` and `src/`)
+- `--delta-test-dirs PATH`: Test directories to search for test files (default: `tests/`)
+- `--delta-debug`: Display detailed debug information including incremental update statistics
+- `--delta-pass-if-no-tests`: Exit with code 0 when no tests need to be run due to no changes
+- `--delta-no-save`: Skip updating the delta file after tests (read-only mode for CI/CD)
 
 ### Examples
 
@@ -116,7 +117,7 @@ pytest --delta --delta-no-save
 The `--delta-vis` option generates visual representations of your project's dependency graph, which is useful for:
 
 - **Understanding code relationships**: See which files depend on each other
-- **Debugging the plugin**: Visualize how pytest-delta determines affected tests  
+- **Debugging the plugin**: Visualize how pytest-delta determines affected tests
 - **Code review**: Get insights into project structure and coupling
 - **Documentation**: Generate dependency diagrams for your project
 
@@ -152,7 +153,7 @@ pytest --delta-vis
 # Render as PNG image (requires graphviz)
 dot -Tpng dependency_graph.dot -o dependency_graph.png
 
-# Render as SVG (scalable)  
+# Render as SVG (scalable)
 dot -Tsvg dependency_graph.dot -o dependency_graph.svg
 
 # Render as PDF
@@ -167,7 +168,7 @@ For rendering graphical outputs, you can install Graphviz:
 # On Ubuntu/Debian
 sudo apt-get install graphviz
 
-# On macOS  
+# On macOS
 brew install graphviz
 
 # On Windows (using chocolatey)
@@ -233,7 +234,7 @@ By default, pytest-delta searches for source files in the project root (`.`) and
 # Use custom source directories
 pytest --delta --delta-source-dirs lib --delta-source-dirs modules
 
-# Use custom test directories  
+# Use custom test directories
 pytest --delta --delta-test-dirs unit_tests --delta-test-dirs integration_tests
 
 # Combine both for complex project layouts
@@ -252,7 +253,7 @@ pytest --delta --delta-debug
 
 This will show you:
 - Which directories are being searched
-- What files were found and analyzed  
+- What files were found and analyzed
 - Which files changed since the last run
 - How the dependency graph was built
 - Which tests were selected and why
@@ -288,7 +289,7 @@ pytest --delta --delta-ignore "tests/integration/*" --delta-ignore "tests/e2e/*"
 The plugin requires no configuration for basic usage. It automatically:
 
 - Finds Python files in the current directory (`.`) and `src/` directories by default
-- Searches for test files in the `tests/` directory by default  
+- Searches for test files in the `tests/` directory by default
 - Excludes virtual environments, `__pycache__`, and other irrelevant directories
 - Creates dependency graphs based on import statements
 - Maps test files to source files using naming conventions

@@ -10,8 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from git import Repo
-from git.exc import GitCommandError, InvalidGitRepositoryError
+from .git_helper import GitHelper, NotAGitRepositoryError
 
 
 class DeltaManager:
@@ -49,11 +48,13 @@ class DeltaManager:
                     and "poetry" in data["tool"]
                     and "version" in data["tool"]["poetry"]
                 ):
-                    return data["tool"]["poetry"]["version"]
+                    version = data["tool"]["poetry"]["version"]
+                    return str(version) if version is not None else None
 
                 # Check for PEP 621 style [project.version]
                 if "project" in data and "version" in data["project"]:
-                    return data["project"]["version"]
+                    version = data["project"]["version"]
+                    return str(version) if version is not None else None
 
             except Exception:
                 # If tomllib import fails or file parsing fails, continue to next method
@@ -81,7 +82,12 @@ class DeltaManager:
                                             and target.id == "__version__"
                                         ):
                                             if isinstance(node.value, ast.Constant):
-                                                return node.value.value
+                                                value = node.value.value
+                                                return (
+                                                    str(value)
+                                                    if isinstance(value, str)
+                                                    else None
+                                                )
                         except Exception:
                             continue
 
@@ -94,7 +100,9 @@ class DeltaManager:
 
         try:
             with open(self.delta_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                # Ensure we're returning a Dict[str, Any] or None
+                return data if isinstance(data, dict) else None
         except (json.JSONDecodeError, OSError) as e:
             raise ValueError(f"Failed to load delta metadata: {e}") from e
 
@@ -109,28 +117,101 @@ class DeltaManager:
         except OSError as e:
             raise ValueError(f"Failed to save delta metadata: {e}") from e
 
-    def update_metadata(self, root_dir: Path) -> None:
-        """Update metadata with current git state."""
+    def update_metadata(
+        self,
+        root_dir: Path,
+        dependency_graph: Optional[Dict[Path, set[Path]]] = None,
+        file_hashes: Optional[Dict[Path, str]] = None,
+    ) -> None:
+        """
+        Update metadata with current git state and optionally the dependency graph.
+
+        Args:
+            root_dir: Root directory of the project
+            dependency_graph: Optional dependency graph to store
+            file_hashes: Optional file hashes corresponding to the dependency graph
+        """
         try:
-            repo = Repo(root_dir, search_parent_directories=True)
-        except InvalidGitRepositoryError as e:
+            git_helper = GitHelper(root_dir, search_parent_directories=True)
+        except NotAGitRepositoryError as e:
             raise ValueError("Not a Git repository") from e
 
         try:
             # Get current commit hash
-            current_commit = repo.head.commit.hexsha
+            current_commit = git_helper.get_current_commit()
 
             # Detect project version
             project_version = self._detect_project_version(root_dir)
 
             # Create metadata
-            metadata = {
+            metadata: Dict[str, Any] = {
                 "last_commit": current_commit,
                 "last_successful_run": True,
                 "version": project_version,
             }
 
+            # Add dependency graph if provided
+            if dependency_graph is not None and file_hashes is not None:
+                # Convert Path objects to strings for JSON serialization
+                graph_data = {}
+                for file_path, dependencies in dependency_graph.items():
+                    # Store relative paths for portability
+                    rel_path = str(file_path.relative_to(root_dir))
+                    dep_rel_paths = [
+                        str(dep.relative_to(root_dir)) for dep in dependencies
+                    ]
+                    graph_data[rel_path] = dep_rel_paths
+
+                hash_data = {
+                    str(file_path.relative_to(root_dir)): file_hash
+                    for file_path, file_hash in file_hashes.items()
+                }
+
+                metadata["dependency_graph"] = graph_data
+                metadata["file_hashes"] = hash_data
+
             self.save_metadata(metadata)
 
-        except GitCommandError as e:
+        except Exception as e:
             raise ValueError(f"Failed to get Git information: {e}") from e
+
+    def load_dependency_graph(
+        self, root_dir: Path
+    ) -> Optional[tuple[Dict[Path, set[Path]], Dict[Path, str]]]:
+        """
+        Load the dependency graph from metadata.
+
+        Args:
+            root_dir: Root directory of the project
+
+        Returns:
+            Tuple of (dependency_graph, file_hashes) if available, None otherwise
+        """
+        metadata = self.load_metadata()
+        if metadata is None:
+            return None
+
+        if "dependency_graph" not in metadata or "file_hashes" not in metadata:
+            return None
+
+        try:
+            # Convert string paths back to Path objects
+            graph_data = metadata["dependency_graph"]
+            hash_data = metadata["file_hashes"]
+
+            dependency_graph = {}
+            for rel_path_str, dep_rel_paths in graph_data.items():
+                file_path = root_dir / rel_path_str
+                dependencies = {root_dir / dep for dep in dep_rel_paths}
+                dependency_graph[file_path] = dependencies
+
+            file_hashes = {
+                root_dir / rel_path_str: file_hash
+                for rel_path_str, file_hash in hash_data.items()
+            }
+
+            return dependency_graph, file_hashes
+
+        except Exception:
+            # If there's any error loading the graph, return None
+            return None

@@ -6,7 +6,7 @@ debugging and understanding the plugin's behavior.
 """
 
 from pathlib import Path
-from typing import Dict, Set, Optional
+from typing import Dict, List, Set, Optional
 
 
 class DependencyVisualizer:
@@ -33,7 +33,7 @@ class DependencyVisualizer:
         lines.append("")
 
         # Create nodes with relative paths as labels
-        node_mapping = {}
+        node_mapping: Dict[Path, str] = {}
         for file_path in dependency_graph.keys():
             try:
                 relative_path = file_path.relative_to(self.root_dir)
@@ -87,7 +87,7 @@ class DependencyVisualizer:
         lines.append("")
 
         # Group files by number of dependencies
-        by_dep_count = {}
+        by_dep_count: Dict[int, List[Path]] = {}
         for file_path, dependencies in dependency_graph.items():
             count = len(dependencies)
             if count not in by_dep_count:
@@ -189,7 +189,11 @@ class DependencyVisualizer:
         # Statistics
         total_files = len(dependency_graph)
         total_deps = sum(len(deps) for deps in dependency_graph.values())
-        max_deps = max(len(deps) for deps in dependency_graph.values()) if dependency_graph else 0
+        max_deps = (
+            max(len(deps) for deps in dependency_graph.values())
+            if dependency_graph
+            else 0
+        )
 
         lines.append(
             f"Files: {total_files} | Dependencies: {total_deps} | Max per file: {max_deps}"
@@ -198,7 +202,8 @@ class DependencyVisualizer:
 
         # Show files with most dependencies (top 10)
         files_with_deps = [
-            (file_path, len(dependencies)) for file_path, dependencies in dependency_graph.items()
+            (file_path, len(dependencies))
+            for file_path, dependencies in dependency_graph.items()
         ]
         files_with_deps.sort(key=lambda x: x[1], reverse=True)
 
