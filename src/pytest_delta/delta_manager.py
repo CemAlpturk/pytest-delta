@@ -117,8 +117,20 @@ class DeltaManager:
         except OSError as e:
             raise ValueError(f"Failed to save delta metadata: {e}") from e
 
-    def update_metadata(self, root_dir: Path) -> None:
-        """Update metadata with current git state."""
+    def update_metadata(
+        self,
+        root_dir: Path,
+        dependency_graph: Optional[Dict[Path, set[Path]]] = None,
+        file_hashes: Optional[Dict[Path, str]] = None,
+    ) -> None:
+        """
+        Update metadata with current git state and optionally the dependency graph.
+
+        Args:
+            root_dir: Root directory of the project
+            dependency_graph: Optional dependency graph to store
+            file_hashes: Optional file hashes corresponding to the dependency graph
+        """
         try:
             git_helper = GitHelper(root_dir, search_parent_directories=True)
         except NotAGitRepositoryError as e:
@@ -132,13 +144,74 @@ class DeltaManager:
             project_version = self._detect_project_version(root_dir)
 
             # Create metadata
-            metadata = {
+            metadata: Dict[str, Any] = {
                 "last_commit": current_commit,
                 "last_successful_run": True,
                 "version": project_version,
             }
 
+            # Add dependency graph if provided
+            if dependency_graph is not None and file_hashes is not None:
+                # Convert Path objects to strings for JSON serialization
+                graph_data = {}
+                for file_path, dependencies in dependency_graph.items():
+                    # Store relative paths for portability
+                    rel_path = str(file_path.relative_to(root_dir))
+                    dep_rel_paths = [
+                        str(dep.relative_to(root_dir)) for dep in dependencies
+                    ]
+                    graph_data[rel_path] = dep_rel_paths
+
+                hash_data = {
+                    str(file_path.relative_to(root_dir)): file_hash
+                    for file_path, file_hash in file_hashes.items()
+                }
+
+                metadata["dependency_graph"] = graph_data
+                metadata["file_hashes"] = hash_data
+
             self.save_metadata(metadata)
 
         except Exception as e:
             raise ValueError(f"Failed to get Git information: {e}") from e
+
+    def load_dependency_graph(
+        self, root_dir: Path
+    ) -> Optional[tuple[Dict[Path, set[Path]], Dict[Path, str]]]:
+        """
+        Load the dependency graph from metadata.
+
+        Args:
+            root_dir: Root directory of the project
+
+        Returns:
+            Tuple of (dependency_graph, file_hashes) if available, None otherwise
+        """
+        metadata = self.load_metadata()
+        if metadata is None:
+            return None
+
+        if "dependency_graph" not in metadata or "file_hashes" not in metadata:
+            return None
+
+        try:
+            # Convert string paths back to Path objects
+            graph_data = metadata["dependency_graph"]
+            hash_data = metadata["file_hashes"]
+
+            dependency_graph = {}
+            for rel_path_str, dep_rel_paths in graph_data.items():
+                file_path = root_dir / rel_path_str
+                dependencies = {root_dir / dep for dep in dep_rel_paths}
+                dependency_graph[file_path] = dependencies
+
+            file_hashes = {
+                root_dir / rel_path_str: file_hash
+                for rel_path_str, file_hash in hash_data.items()
+            }
+
+            return dependency_graph, file_hashes
+
+        except Exception:
+            # If there's any error loading the graph, return None
+            return None

@@ -62,6 +62,11 @@ class DependencyAnalyzer:
             "cache_misses": 0,
             "regex_fast_path": 0,
             "ast_full_parse": 0,
+            "incremental_added_files": 0,
+            "incremental_removed_files": 0,
+            "incremental_modified_files": 0,
+            "incremental_reparsed_files": 0,
+            "incremental_reused_files": 0,
         }
 
     def build_dependency_graph(self) -> Dict[Path, Set[Path]]:
@@ -87,6 +92,117 @@ class DependencyAnalyzer:
             dependency_graph[file_path] = tracked_dependencies
 
         return dependency_graph
+
+    def build_dependency_graph_incremental(
+        self,
+        previous_graph: Dict[Path, set[Path]],
+        previous_hashes: Dict[Path, str],
+    ) -> tuple[Dict[Path, set[Path]], set[Path], Dict[Path, str]]:
+        """
+        Build dependency graph incrementally by only reparsing changed files.
+
+        This method provides significant performance improvements when only a few files
+        have changed by:
+        1. Detecting which files have been added, removed, or modified
+        2. Only reparsing those files and files that depend on them
+        3. Reusing the previous graph for unchanged files
+
+        Args:
+            previous_graph: Previously computed dependency graph
+            previous_hashes: File hashes from when previous_graph was built
+
+        Returns:
+            Tuple of (new_dependency_graph, reparsed_files_set, new_file_hashes)
+        """
+        # Find current files
+        source_files = self._find_source_files()
+        test_files = self._find_test_files()
+        all_files = source_files | test_files
+        all_python_files = self._find_python_files()
+
+        # Track what changed
+        current_hashes = {}
+        changed_files = set()
+        added_files = set()
+        removed_files = set()
+
+        # Compute current hashes and detect changes
+        for file_path in all_files:
+            current_hash = self._get_file_hash(file_path)
+            if current_hash is None:
+                continue
+
+            current_hashes[file_path] = current_hash
+
+            if file_path not in previous_hashes:
+                # New file
+                added_files.add(file_path)
+                changed_files.add(file_path)
+            elif previous_hashes[file_path] != current_hash:
+                # Modified file
+                changed_files.add(file_path)
+
+        # Detect removed files
+        for file_path in previous_hashes:
+            if file_path not in all_files:
+                removed_files.add(file_path)
+
+        # Build reverse dependency graph to find affected files
+        reverse_deps = self._build_reverse_dependency_graph(previous_graph)
+
+        # Find all files that need reparsing:
+        # 1. Changed files themselves
+        # 2. Files that import changed files (direct dependents)
+        # 3. Files that transitively depend on changed files
+        files_to_reparse = set(changed_files)
+
+        # Add direct and transitive dependents of changed files
+        to_process = list(changed_files)
+        processed = set()
+
+        while to_process:
+            current_file = to_process.pop(0)
+            if current_file in processed:
+                continue
+            processed.add(current_file)
+
+            # Find files that depend on the current file
+            dependents = reverse_deps.get(current_file, set())
+            for dependent in dependents:
+                if dependent in all_files and dependent not in processed:
+                    files_to_reparse.add(dependent)
+                    to_process.append(dependent)
+
+        # Build new graph incrementally
+        new_graph = {}
+
+        # Copy unchanged files from previous graph
+        for file_path in all_files:
+            if file_path not in files_to_reparse and file_path in previous_graph:
+                # File hasn't changed and doesn't depend on changed files
+                # Reuse dependencies from previous graph, but filter to current files
+                old_deps = previous_graph[file_path]
+                new_graph[file_path] = {dep for dep in old_deps if dep in all_files}
+
+        # Reparse changed files and their dependents
+        for file_path in files_to_reparse:
+            if file_path in all_files:  # Skip removed files
+                dependencies = self._extract_dependencies(file_path, all_python_files)
+                tracked_dependencies = {dep for dep in dependencies if dep in all_files}
+                new_graph[file_path] = tracked_dependencies
+
+        # Track statistics
+        self._debug_info["incremental_added_files"] = len(added_files)
+        self._debug_info["incremental_removed_files"] = len(removed_files)
+        self._debug_info["incremental_modified_files"] = len(
+            changed_files - added_files
+        )
+        self._debug_info["incremental_reparsed_files"] = len(files_to_reparse)
+        self._debug_info["incremental_reused_files"] = len(all_files) - len(
+            files_to_reparse
+        )
+
+        return new_graph, files_to_reparse, current_hashes
 
     def get_debug_info(self) -> Dict[str, Any]:
         """Return debug information collected during analysis."""
@@ -362,6 +478,22 @@ class DependencyAnalyzer:
                 f"Parsing methods: {debug_info['regex_fast_path']} regex fast path, "
                 f"{debug_info['ast_full_parse']} AST full parse ({regex_rate:.1f}% fast path)"
             )
+
+        # Incremental update statistics
+        total_reparsed = debug_info["incremental_reparsed_files"]
+        total_reused = debug_info["incremental_reused_files"]
+        if total_reparsed > 0 or total_reused > 0:
+            print_func("\n=== Incremental Update Statistics ===")
+            print_func(f"Added files: {debug_info['incremental_added_files']}")
+            print_func(f"Removed files: {debug_info['incremental_removed_files']}")
+            print_func(f"Modified files: {debug_info['incremental_modified_files']}")
+            print_func(f"Files reparsed: {total_reparsed}")
+            print_func(f"Files reused from cache: {total_reused}")
+
+            total_files = total_reparsed + total_reused
+            if total_files > 0:
+                reuse_rate = (total_reused / total_files) * 100
+                print_func(f"Cache reuse rate: {reuse_rate:.1f}%")
 
     def find_affected_files(
         self, changed_files: Set[Path], dependency_graph: Dict[Path, Set[Path]]

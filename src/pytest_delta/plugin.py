@@ -212,7 +212,15 @@ class DeltaPlugin:
         if exitstatus == 0:  # Tests passed successfully
             if not self.no_save:
                 try:
-                    self.delta_manager.update_metadata(self.root_dir)
+                    # Save dependency graph along with metadata if available
+                    if hasattr(self, "dependency_graph") and hasattr(
+                        self, "file_hashes"
+                    ):
+                        self.delta_manager.update_metadata(
+                            self.root_dir, self.dependency_graph, self.file_hashes
+                        )
+                    else:
+                        self.delta_manager.update_metadata(self.root_dir)
                     self._print_info("Delta metadata updated successfully")
                 except Exception as e:
                     self._print_warning(f"Failed to update delta metadata: {e}")
@@ -266,8 +274,33 @@ class DeltaPlugin:
             changed_source_files = {f for f in changed_files if f in source_files}
             changed_test_files = {f for f in changed_files if f in test_files}
 
-            # Build dependency graph including both source and test files
-            dependency_graph = self.dependency_analyzer.build_dependency_graph()
+            # Build dependency graph - use incremental if possible
+            previous_graph_data = self.delta_manager.load_dependency_graph(
+                self.root_dir
+            )
+
+            if previous_graph_data is not None and not self.force_regenerate:
+                # Use incremental update
+                previous_graph, previous_hashes = previous_graph_data
+                (
+                    dependency_graph,
+                    reparsed_files,
+                    file_hashes,
+                ) = self.dependency_analyzer.build_dependency_graph_incremental(
+                    previous_graph, previous_hashes
+                )
+                self._print_debug(
+                    f"Incremental graph update: reparsed {len(reparsed_files)} files"
+                )
+            else:
+                # Full rebuild
+                dependency_graph = self.dependency_analyzer.build_dependency_graph()
+                # Compute file hashes for next time
+                file_hashes = {}
+                for file_path in dependency_graph.keys():
+                    file_hash = self.dependency_analyzer._get_file_hash(file_path)
+                    if file_hash:
+                        file_hashes[file_path] = file_hash
 
             # Find all files affected by the changes (including test files that depend on changed source files)
             all_changed_files = changed_source_files | changed_test_files
@@ -275,7 +308,9 @@ class DeltaPlugin:
                 all_changed_files, dependency_graph
             )
 
-            # Store affected files and directly changed test files separately for filtering
+            # Store for later use
+            self.dependency_graph = dependency_graph
+            self.file_hashes = file_hashes
             self.affected_files = affected_files
             self.changed_test_files = changed_test_files
             self.changed_source_files = changed_source_files
@@ -324,8 +359,11 @@ class DeltaPlugin:
         try:
             self._print_info("Generating dependency graph visualization...")
 
-            # Build the dependency graph
-            dependency_graph = self.dependency_analyzer.build_dependency_graph()
+            # Build the dependency graph (or reuse if already built)
+            if hasattr(self, "dependency_graph"):
+                dependency_graph = self.dependency_graph
+            else:
+                dependency_graph = self.dependency_analyzer.build_dependency_graph()
 
             # Generate console output for immediate feedback
             console_output = self.visualizer.generate_console_output(dependency_graph)
