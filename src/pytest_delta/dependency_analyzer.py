@@ -9,7 +9,7 @@ import ast
 import fnmatch
 import hashlib
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 
 class DependencyAnalyzer:
@@ -32,7 +32,7 @@ class DependencyAnalyzer:
         self._dependency_cache: Dict[str, Set[Path]] = {}
 
         # Debug information storage
-        self._debug_info = {
+        self._debug_info: Dict[str, Any] = {
             "configured_source_dirs": self.source_dirs.copy(),
             "configured_test_dirs": self.test_dirs.copy(),
             "searched_dirs": [],
@@ -68,7 +68,7 @@ class DependencyAnalyzer:
 
         return dependency_graph
 
-    def get_debug_info(self) -> Dict:
+    def get_debug_info(self) -> Dict[str, Any]:
         """Return debug information collected during analysis."""
         return self._debug_info.copy()
 
@@ -143,7 +143,7 @@ class DependencyAnalyzer:
         Returns:
             Set of file paths that this file depends on
         """
-        dependencies = set()
+        dependencies: Set[Path] = set()
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -193,7 +193,7 @@ class DependencyAnalyzer:
 
         return dependencies
 
-    def print_directory_debug_info(self, print_func) -> None:
+    def print_directory_debug_info(self, print_func: Callable[[str], None]) -> None:
         """Print detailed directory search debug information."""
         debug_info = self._debug_info
 
@@ -585,7 +585,7 @@ class DependencyAnalyzer:
         self, dependency_graph: Dict[Path, Set[Path]]
     ) -> Dict[Path, Set[Path]]:
         """Build reverse dependency graph (who depends on whom)."""
-        reverse_deps = {}
+        reverse_deps: Dict[Path, Set[Path]] = {}
 
         for file_path, dependencies in dependency_graph.items():
             for dependency in dependencies:

@@ -48,11 +48,13 @@ class DeltaManager:
                     and "poetry" in data["tool"]
                     and "version" in data["tool"]["poetry"]
                 ):
-                    return data["tool"]["poetry"]["version"]
+                    version = data["tool"]["poetry"]["version"]
+                    return str(version) if version is not None else None
 
                 # Check for PEP 621 style [project.version]
                 if "project" in data and "version" in data["project"]:
-                    return data["project"]["version"]
+                    version = data["project"]["version"]
+                    return str(version) if version is not None else None
 
             except Exception:
                 # If tomllib import fails or file parsing fails, continue to next method
@@ -80,7 +82,12 @@ class DeltaManager:
                                             and target.id == "__version__"
                                         ):
                                             if isinstance(node.value, ast.Constant):
-                                                return node.value.value
+                                                value = node.value.value
+                                                return (
+                                                    str(value)
+                                                    if isinstance(value, str)
+                                                    else None
+                                                )
                         except Exception:
                             continue
 
@@ -93,7 +100,9 @@ class DeltaManager:
 
         try:
             with open(self.delta_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                # Ensure we're returning a Dict[str, Any] or None
+                return data if isinstance(data, dict) else None
         except (json.JSONDecodeError, OSError) as e:
             raise ValueError(f"Failed to load delta metadata: {e}") from e
 

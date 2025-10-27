@@ -73,7 +73,7 @@ class GitHelper:
 
     def _run_git_command(
         self, args: list[str], check: bool = True, cwd: Optional[Path] = None
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """
         Run a git command using subprocess.
 
