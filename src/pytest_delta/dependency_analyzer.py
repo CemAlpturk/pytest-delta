@@ -7,8 +7,9 @@ and determines which files are affected by changes.
 
 import ast
 import fnmatch
+import hashlib
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 
 
 class DependencyAnalyzer:
@@ -25,6 +26,11 @@ class DependencyAnalyzer:
         self.ignore_patterns = ignore_patterns or []
         self.source_dirs = source_dirs or [".", "src"]
         self.test_dirs = test_dirs or ["tests"]
+
+        # Cache for file hashes and parsed dependencies
+        self._file_hash_cache: Dict[Path, str] = {}
+        self._dependency_cache: Dict[str, Set[Path]] = {}
+
         # Debug information storage
         self._debug_info = {
             "configured_source_dirs": self.source_dirs.copy(),
@@ -34,6 +40,8 @@ class DependencyAnalyzer:
             "excluded_files": [],
             "ignored_files": [],
             "directory_file_counts": {},
+            "cache_hits": 0,
+            "cache_misses": 0,
         }
 
     def build_dependency_graph(self) -> Dict[Path, Set[Path]]:
@@ -64,6 +72,127 @@ class DependencyAnalyzer:
         """Return debug information collected during analysis."""
         return self._debug_info.copy()
 
+    def _get_file_hash(self, file_path: Path) -> str | None:
+        """
+        Compute MD5 hash of file contents for caching purposes.
+
+        Args:
+            file_path: Path to the file to hash
+
+        Returns:
+            MD5 hash string, or None if file cannot be read
+        """
+        # Check if hash is already cached
+        if file_path in self._file_hash_cache:
+            return self._file_hash_cache[file_path]
+
+        try:
+            with open(file_path, "rb") as f:
+                content = f.read()
+                file_hash = hashlib.md5(content).hexdigest()
+                self._file_hash_cache[file_path] = file_hash
+                return file_hash
+        except (OSError, IOError):
+            return None
+
+    def _get_cached_dependencies(
+        self, file_path: Path, all_files: Set[Path]
+    ) -> Tuple[Set[Path], bool]:
+        """
+        Get dependencies from cache if file hasn't changed, otherwise parse the file.
+
+        Args:
+            file_path: Path to the file to analyze
+            all_files: Set of all files in the project
+
+        Returns:
+            Tuple of (dependencies set, cache_hit boolean)
+        """
+        file_hash = self._get_file_hash(file_path)
+        if file_hash is None:
+            return set(), False
+
+        # Create cache key combining file path and hash
+        cache_key = f"{file_path}:{file_hash}"
+
+        # Check if we have cached dependencies for this file hash
+        if cache_key in self._dependency_cache:
+            self._debug_info["cache_hits"] += 1
+            return self._dependency_cache[cache_key], True
+
+        # Cache miss - need to parse the file
+        self._debug_info["cache_misses"] += 1
+        dependencies = self._parse_file_dependencies(file_path, all_files)
+
+        # Store in cache
+        self._dependency_cache[cache_key] = dependencies
+
+        return dependencies, False
+
+    def _parse_file_dependencies(
+        self, file_path: Path, all_files: Set[Path]
+    ) -> Set[Path]:
+        """
+        Parse a Python file and extract its dependencies.
+        This is the actual parsing logic separated from caching.
+
+        Args:
+            file_path: Path to the file to parse
+            all_files: Set of all files in the project
+
+        Returns:
+            Set of file paths that this file depends on
+        """
+        dependencies = set()
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except (OSError, UnicodeDecodeError):
+            # Skip files that can't be read
+            return dependencies
+
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            # Skip files with syntax errors
+            return dependencies
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    dep_path = self._resolve_import_to_file(alias.name, all_files)
+                    if dep_path:
+                        dependencies.add(dep_path)
+
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    # Handle relative imports
+                    if node.level > 0:  # Relative import
+                        module_name = self._resolve_relative_import(
+                            file_path, node.module, node.level
+                        )
+                    else:
+                        module_name = node.module
+
+                    if module_name:
+                        dep_path = self._resolve_import_to_file(module_name, all_files)
+                        if dep_path:
+                            dependencies.add(dep_path)
+
+                # Also handle individual imports from modules
+                for alias in node.names:
+                    if node.module:
+                        full_name = f"{node.module}.{alias.name}"
+                    else:
+                        full_name = alias.name
+
+                    dep_path = self._resolve_import_to_file(full_name, all_files)
+                    if dep_path:
+                        dependencies.add(dep_path)
+
+        return dependencies
+
     def print_directory_debug_info(self, print_func) -> None:
         """Print detailed directory search debug information."""
         debug_info = self._debug_info
@@ -71,7 +200,9 @@ class DependencyAnalyzer:
         print_func("=== Directory Search Debug Information ===")
 
         # Configured directories
-        print_func(f"Configured source directories: {debug_info['configured_source_dirs']}")
+        print_func(
+            f"Configured source directories: {debug_info['configured_source_dirs']}"
+        )
         print_func(f"Configured test directories: {debug_info['configured_test_dirs']}")
 
         # Directories actually searched
@@ -96,11 +227,11 @@ class DependencyAnalyzer:
 
         # Excluded files (by built-in patterns)
         if debug_info["excluded_files"]:
-            excluded_summary = (
-                f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
-            )
+            excluded_summary = f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
             if len(debug_info["excluded_files"]) <= 5:
-                print_func(f"{excluded_summary}: {', '.join(debug_info['excluded_files'])}")
+                print_func(
+                    f"{excluded_summary}: {', '.join(debug_info['excluded_files'])}"
+                )
             else:
                 print_func(
                     f"{excluded_summary} (showing first 5): {', '.join(debug_info['excluded_files'][:5])}"
@@ -108,9 +239,13 @@ class DependencyAnalyzer:
 
         # Ignored files (by user patterns)
         if debug_info["ignored_files"]:
-            ignored_summary = f"{len(debug_info['ignored_files'])} files ignored by user patterns"
+            ignored_summary = (
+                f"{len(debug_info['ignored_files'])} files ignored by user patterns"
+            )
             if len(debug_info["ignored_files"]) <= 5:
-                print_func(f"{ignored_summary}: {', '.join(debug_info['ignored_files'])}")
+                print_func(
+                    f"{ignored_summary}: {', '.join(debug_info['ignored_files'])}"
+                )
             else:
                 print_func(
                     f"{ignored_summary} (showing first 5): {', '.join(debug_info['ignored_files'][:5])}"
@@ -119,6 +254,15 @@ class DependencyAnalyzer:
         # User ignore patterns (if any)
         if self.ignore_patterns:
             print_func(f"User ignore patterns: {self.ignore_patterns}")
+
+        # Cache statistics
+        total_cache_requests = debug_info["cache_hits"] + debug_info["cache_misses"]
+        if total_cache_requests > 0:
+            hit_rate = (debug_info["cache_hits"] / total_cache_requests) * 100
+            print_func(
+                f"Cache statistics: {debug_info['cache_hits']} hits, "
+                f"{debug_info['cache_misses']} misses ({hit_rate:.1f}% hit rate)"
+            )
 
     def find_affected_files(
         self, changed_files: Set[Path], dependency_graph: Dict[Path, Set[Path]]
@@ -186,7 +330,9 @@ class DependencyAnalyzer:
 
         for search_dir in search_dirs:
             if search_dir.is_dir():
-                self._debug_info["searched_dirs"].append(str(search_dir.relative_to(self.root_dir)))
+                self._debug_info["searched_dirs"].append(
+                    str(search_dir.relative_to(self.root_dir))
+                )
                 files_found_in_dir = 0
 
                 # If search_dir is the root directory, only get .py files directly in root (not recursive)
@@ -210,7 +356,9 @@ class DependencyAnalyzer:
                 self._debug_info["directory_file_counts"][dir_name] = files_found_in_dir
             else:
                 # Directory doesn't exist or isn't a directory
-                self._debug_info["skipped_dirs"].append(str(search_dir.relative_to(self.root_dir)))
+                self._debug_info["skipped_dirs"].append(
+                    str(search_dir.relative_to(self.root_dir))
+                )
 
         # Filter out __pycache__, .venv, and other irrelevant files
         filtered_files = set()
@@ -334,58 +482,23 @@ class DependencyAnalyzer:
         return False
 
     def _extract_dependencies(self, file_path: Path, all_files: Set[Path]) -> Set[Path]:
-        """Extract dependencies (imports) from a Python file."""
-        dependencies = set()
+        """
+        Extract dependencies (imports) from a Python file.
+        Uses caching to avoid re-parsing unchanged files.
 
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except (OSError, UnicodeDecodeError):
-            # Skip files that can't be read
-            return dependencies
+        Args:
+            file_path: Path to the file to analyze
+            all_files: Set of all files in the project
 
-        try:
-            tree = ast.parse(content)
-        except SyntaxError:
-            # Skip files with syntax errors
-            return dependencies
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    dep_path = self._resolve_import_to_file(alias.name, all_files)
-                    if dep_path:
-                        dependencies.add(dep_path)
-
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    # Handle relative imports
-                    if node.level > 0:  # Relative import
-                        module_name = self._resolve_relative_import(
-                            file_path, node.module, node.level
-                        )
-                    else:
-                        module_name = node.module
-
-                    if module_name:
-                        dep_path = self._resolve_import_to_file(module_name, all_files)
-                        if dep_path:
-                            dependencies.add(dep_path)
-
-                # Also handle individual imports from modules
-                for alias in node.names:
-                    if node.module:
-                        full_name = f"{node.module}.{alias.name}"
-                    else:
-                        full_name = alias.name
-
-                    dep_path = self._resolve_import_to_file(full_name, all_files)
-                    if dep_path:
-                        dependencies.add(dep_path)
-
+        Returns:
+            Set of file paths that this file depends on
+        """
+        dependencies, _ = self._get_cached_dependencies(file_path, all_files)
         return dependencies
 
-    def _resolve_import_to_file(self, import_name: str, all_files: Set[Path]) -> Path | None:
+    def _resolve_import_to_file(
+        self, import_name: str, all_files: Set[Path]
+    ) -> Path | None:
         """Resolve an import name to an actual file path."""
         # Convert module name to potential file paths
         parts = import_name.split(".")
@@ -424,9 +537,9 @@ class DependencyAnalyzer:
                     file_relative = file_path.relative_to(self.root_dir)
                     # Check if the relative path matches the potential path exactly
                     # or if it's in a subdirectory structure that matches
-                    if str(file_relative) == str(potential_path) or str(file_relative).endswith(
-                        "/" + str(potential_path)
-                    ):
+                    if str(file_relative) == str(potential_path) or str(
+                        file_relative
+                    ).endswith("/" + str(potential_path)):
                         return file_path
                 except ValueError:
                     continue
@@ -455,7 +568,9 @@ class DependencyAnalyzer:
             return None
 
         base_parts = (
-            current_dir_parts[:-levels_to_go_up] if levels_to_go_up > 0 else current_dir_parts
+            current_dir_parts[:-levels_to_go_up]
+            if levels_to_go_up > 0
+            else current_dir_parts
         )
 
         if module_name:
