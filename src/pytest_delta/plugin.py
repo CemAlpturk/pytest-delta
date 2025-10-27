@@ -9,11 +9,10 @@ from pathlib import Path
 from typing import List, Set
 
 import pytest
-from git import Repo
-from git.exc import GitCommandError, InvalidGitRepositoryError
 
 from .dependency_analyzer import DependencyAnalyzer
 from .delta_manager import DeltaManager
+from .git_helper import GitCommandError, GitHelper, NotAGitRepositoryError
 from .visualizer import DependencyVisualizer
 
 
@@ -182,7 +181,8 @@ class DeltaPlugin:
 
             if filtered_count > 0:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir)) for f in sorted(self.affected_files)
+                    str(f.relative_to(self.root_dir))
+                    for f in sorted(self.affected_files)
                 )
                 self._print_debug(f"Affected files: {affected_files_str}")
 
@@ -217,13 +217,15 @@ class DeltaPlugin:
                 except Exception as e:
                     self._print_warning(f"Failed to update delta metadata: {e}")
             else:
-                self._print_info("Delta metadata update skipped (--delta-no-save enabled)")
+                self._print_info(
+                    "Delta metadata update skipped (--delta-no-save enabled)"
+                )
 
     def _analyze_changes(self) -> None:
         """Analyze what files have changed and determine affected files."""
         try:
-            repo = Repo(self.root_dir, search_parent_directories=True)
-        except InvalidGitRepositoryError:
+            git_helper = GitHelper(self.root_dir, search_parent_directories=True)
+        except NotAGitRepositoryError:
             self._print_warning("Not a Git repository, running all tests")
             self.should_run_all = True
             return
@@ -245,7 +247,7 @@ class DeltaPlugin:
 
             # Get changed files since last commit
             try:
-                changed_files = self._get_changed_files(repo, last_commit)
+                changed_files = self._get_changed_files(git_helper, last_commit)
             except GitCommandError as e:
                 self._print_warning(f"Git error: {e}")
                 self._print_warning("Running all tests")
@@ -283,57 +285,21 @@ class DeltaPlugin:
             self._print_warning(f"Error analyzing changes: {e}")
             self.should_run_all = True
 
-    def _get_changed_files(self, repo: Repo, last_commit: str) -> Set[Path]:
-        """Get list of files changed since the last commit."""
-        changed_files = set()
+    def _get_changed_files(self, git_helper: GitHelper, last_commit: str) -> Set[Path]:
+        """
+        Get list of files changed since the last commit.
 
-        git_root = Path(repo.working_dir).resolve()
+        Uses GitHelper for fast git operations via subprocess.
 
-        try:
-            # Get committed changes
-            diff = repo.commit(last_commit).diff("HEAD")
-            for item in diff:
-                if item.a_path:
-                    file_path = git_root / item.a_path
-                    if file_path.suffix == ".py" and file_path.exists():
-                        changed_files.add(file_path)
-                if item.b_path:
-                    file_path = git_root / item.b_path
-                    if file_path.suffix == ".py" and file_path.exists():
-                        changed_files.add(file_path)
-        except GitCommandError:
-            # Last commit might not exist, compare with HEAD
-            pass
+        Args:
+            git_helper: GitHelper instance
+            last_commit: Last commit hash to compare against
 
-        # Get uncommitted changes (staged and unstaged)
-        try:
-            # Staged changes
-            diff_staged = repo.index.diff("HEAD")
-            for item in diff_staged:
-                if item.a_path:
-                    file_path = git_root / item.a_path
-                    if file_path.suffix == ".py" and file_path.exists():
-                        changed_files.add(file_path)
-                if item.b_path:
-                    file_path = git_root / item.b_path
-                    if file_path.suffix == ".py" and file_path.exists():
-                        changed_files.add(file_path)
-
-            # Unstaged changes
-            diff_unstaged = repo.index.diff(None)
-            for item in diff_unstaged:
-                if item.a_path:
-                    file_path = git_root / item.a_path
-                    if file_path.suffix == ".py" and file_path.exists():
-                        changed_files.add(file_path)
-                if item.b_path:
-                    file_path = git_root / item.b_path
-                    if file_path.suffix == ".py" and file_path.exists():
-                        changed_files.add(file_path)
-        except GitCommandError:
-            pass
-
-        return changed_files
+        Returns:
+            Set of changed Python file paths
+        """
+        # Get all changes (committed, staged, and unstaged)
+        return git_helper.get_all_changes(from_commit=last_commit)
 
     def _filter_affected_tests(self, items: List[pytest.Item]) -> List[pytest.Item]:
         """Filter test items to only include those affected by changes."""
@@ -366,11 +332,15 @@ class DeltaPlugin:
             print("\n" + console_output)
 
             # Save DOT format file
-            dot_file = self.visualizer.save_visualization(dependency_graph, format="dot")
+            dot_file = self.visualizer.save_visualization(
+                dependency_graph, format="dot"
+            )
             self._print_info(f"DOT format saved to: {dot_file}")
 
             # Save text summary
-            txt_file = self.visualizer.save_visualization(dependency_graph, format="txt")
+            txt_file = self.visualizer.save_visualization(
+                dependency_graph, format="txt"
+            )
             self._print_info(f"Text summary saved to: {txt_file}")
 
             self._print_info("Visualization complete!")
@@ -394,7 +364,8 @@ class DeltaPlugin:
 
             if self.changed_source_files:
                 source_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir)) for f in sorted(self.changed_source_files)
+                    str(f.relative_to(self.root_dir))
+                    for f in sorted(self.changed_source_files)
                 )
                 self._print_debug(
                     f"Changed source files ({len(self.changed_source_files)}): {source_files_str}"
@@ -404,7 +375,8 @@ class DeltaPlugin:
 
             if self.changed_test_files:
                 test_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir)) for f in sorted(self.changed_test_files)
+                    str(f.relative_to(self.root_dir))
+                    for f in sorted(self.changed_test_files)
                 )
                 self._print_debug(
                     f"Changed test files ({len(self.changed_test_files)}): {test_files_str}"
@@ -433,12 +405,16 @@ class DeltaPlugin:
 
             # Determine which test files will be selected
             for test_file in all_test_files:
-                if test_file in self.changed_test_files or test_file in self.affected_files:
+                if (
+                    test_file in self.changed_test_files
+                    or test_file in self.affected_files
+                ):
                     selected_test_files.add(test_file)
 
             if selected_test_files:
                 selected_test_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir)) for f in sorted(selected_test_files)
+                    str(f.relative_to(self.root_dir))
+                    for f in sorted(selected_test_files)
                 )
                 self._print_debug(
                     f"Test files to be run ({len(selected_test_files)}): {selected_test_files_str}"

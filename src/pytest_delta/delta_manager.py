@@ -10,8 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from git import Repo
-from git.exc import GitCommandError, InvalidGitRepositoryError
+from .git_helper import GitHelper, NotAGitRepositoryError
 
 
 class DeltaManager:
@@ -112,13 +111,13 @@ class DeltaManager:
     def update_metadata(self, root_dir: Path) -> None:
         """Update metadata with current git state."""
         try:
-            repo = Repo(root_dir, search_parent_directories=True)
-        except InvalidGitRepositoryError as e:
+            git_helper = GitHelper(root_dir, search_parent_directories=True)
+        except NotAGitRepositoryError as e:
             raise ValueError("Not a Git repository") from e
 
         try:
             # Get current commit hash
-            current_commit = repo.head.commit.hexsha
+            current_commit = git_helper.get_current_commit()
 
             # Detect project version
             project_version = self._detect_project_version(root_dir)
@@ -132,5 +131,5 @@ class DeltaManager:
 
             self.save_metadata(metadata)
 
-        except GitCommandError as e:
+        except Exception as e:
             raise ValueError(f"Failed to get Git information: {e}") from e
