@@ -8,12 +8,30 @@ and determines which files are affected by changes.
 import ast
 import fnmatch
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Set, Tuple
 
 
 class DependencyAnalyzer:
     """Analyzes Python file dependencies based on imports."""
+
+    # Regex patterns for fast import detection
+    _IMPORT_REGEX = re.compile(
+        r"^\s*(?:from\s+([.\w]+)\s+)?import\s+(.+?)(?:\s+as\s+\w+)?(?:\s*[#\n]|$)",
+        re.MULTILINE,
+    )
+
+    # Patterns that indicate a file needs full AST parsing
+    _COMPLEX_PATTERNS = [
+        "try:",
+        "except",
+        "if __name__",
+        "exec(",
+        "eval(",
+        "__import__(",
+        "importlib",
+    ]
 
     def __init__(
         self,
@@ -42,6 +60,8 @@ class DependencyAnalyzer:
             "directory_file_counts": {},
             "cache_hits": 0,
             "cache_misses": 0,
+            "regex_fast_path": 0,
+            "ast_full_parse": 0,
         }
 
     def build_dependency_graph(self) -> Dict[Path, Set[Path]]:
@@ -152,6 +172,21 @@ class DependencyAnalyzer:
             # Skip files that can't be read
             return dependencies
 
+        # Try fast path: regex-based import detection for simple files
+        if not self._has_complex_patterns(content):
+            module_names = self._quick_scan_imports(content)
+            if module_names is not None:
+                # Fast path succeeded
+                self._debug_info["regex_fast_path"] += 1
+                for module_name in module_names:
+                    dep_path = self._resolve_import_to_file(module_name, all_files)
+                    if dep_path:
+                        dependencies.add(dep_path)
+                return dependencies
+
+        # Fall back to full AST parsing for complex files
+        self._debug_info["ast_full_parse"] += 1
+
         try:
             tree = ast.parse(content)
         except SyntaxError:
@@ -168,15 +203,18 @@ class DependencyAnalyzer:
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     # Handle relative imports
+                    resolved_module: str | None
                     if node.level > 0:  # Relative import
-                        module_name = self._resolve_relative_import(
+                        resolved_module = self._resolve_relative_import(
                             file_path, node.module, node.level
                         )
                     else:
-                        module_name = node.module
+                        resolved_module = node.module
 
-                    if module_name:
-                        dep_path = self._resolve_import_to_file(module_name, all_files)
+                    if resolved_module:
+                        dep_path = self._resolve_import_to_file(
+                            resolved_module, all_files
+                        )
                         if dep_path:
                             dependencies.add(dep_path)
 
@@ -192,6 +230,58 @@ class DependencyAnalyzer:
                         dependencies.add(dep_path)
 
         return dependencies
+
+    def _has_complex_patterns(self, content: str) -> bool:
+        """
+        Check if file content contains patterns that require full AST parsing.
+
+        Args:
+            content: File content to analyze
+
+        Returns:
+            True if file needs AST parsing, False if regex is sufficient
+        """
+        # Check for complex patterns that regex can't handle reliably
+        for pattern in self._COMPLEX_PATTERNS:
+            if pattern in content:
+                return True
+        return False
+
+    def _quick_scan_imports(self, content: str) -> Set[str] | None:
+        """
+        Fast regex-based import detection for simple files.
+
+        Returns a set of module names if successful, None if AST parsing is needed.
+
+        Args:
+            content: File content to scan
+
+        Returns:
+            Set of imported module names, or None if full AST parsing is required
+        """
+        # Check if this file needs full AST parsing
+        if self._has_complex_patterns(content):
+            return None
+
+        imports: Set[str] = set()
+
+        # Find all import statements using regex
+        for match in self._IMPORT_REGEX.finditer(content):
+            from_module = match.group(1)  # The module after 'from'
+            import_part = match.group(2)  # The module/names after 'import'
+
+            if from_module:
+                # from module import something
+                imports.add(from_module)
+            else:
+                # import module or import module, module2
+                # Split by comma and get the first module name
+                for item in import_part.split(","):
+                    module_name = item.strip().split()[0]  # Get name before 'as'
+                    if module_name:
+                        imports.add(module_name)
+
+        return imports
 
     def print_directory_debug_info(self, print_func: Callable[[str], None]) -> None:
         """Print detailed directory search debug information."""
@@ -262,6 +352,15 @@ class DependencyAnalyzer:
             print_func(
                 f"Cache statistics: {debug_info['cache_hits']} hits, "
                 f"{debug_info['cache_misses']} misses ({hit_rate:.1f}% hit rate)"
+            )
+
+        # Parsing method statistics
+        total_parses = debug_info["regex_fast_path"] + debug_info["ast_full_parse"]
+        if total_parses > 0:
+            regex_rate = (debug_info["regex_fast_path"] / total_parses) * 100
+            print_func(
+                f"Parsing methods: {debug_info['regex_fast_path']} regex fast path, "
+                f"{debug_info['ast_full_parse']} AST full parse ({regex_rate:.1f}% fast path)"
             )
 
     def find_affected_files(
