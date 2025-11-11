@@ -84,9 +84,7 @@ class DeltaManager:
                                             if isinstance(node.value, ast.Constant):
                                                 value = node.value.value
                                                 return (
-                                                    str(value)
-                                                    if isinstance(value, str)
-                                                    else None
+                                                    str(value) if isinstance(value, str) else None
                                                 )
                         except Exception:
                             continue
@@ -107,13 +105,54 @@ class DeltaManager:
             raise ValueError(f"Failed to load delta metadata: {e}") from e
 
     def save_metadata(self, metadata: Dict[str, Any]) -> None:
-        """Save metadata to the delta file."""
+        """
+        Save metadata to the delta file using hybrid JSON format.
+
+        The hybrid format uses:
+        - Readable indentation for simple scalar fields
+        - Compact single-line format for large dictionaries (dependency_graph, file_hashes)
+
+        This minimizes Git diff impact while maintaining JSON compatibility.
+        """
         try:
             # Ensure parent directory exists
             self.delta_file.parent.mkdir(parents=True, exist_ok=True)
 
             with open(self.delta_file, "w", encoding="utf-8") as f:
-                json.dump(metadata, f, indent=2, sort_keys=True)
+                # Collect all fields to write in order
+                lines = []
+
+                # Simple scalar fields - readable format
+                simple_fields = ["last_commit", "last_successful_run", "version"]
+                for field in simple_fields:
+                    if field in metadata:
+                        value = metadata[field]
+                        # Format value appropriately
+                        if isinstance(value, str):
+                            json_value = json.dumps(value)
+                        elif isinstance(value, bool):
+                            json_value = "true" if value else "false"
+                        else:
+                            json_value = json.dumps(value)
+                        lines.append(f'  "{field}": {json_value}')
+
+                # Large dictionary fields - compact single-line format
+                dict_fields = ["dependency_graph", "file_hashes"]
+                for field in dict_fields:
+                    if field in metadata:
+                        # Compact JSON without spaces
+                        json_value = json.dumps(
+                            metadata[field], sort_keys=True, separators=(",", ":")
+                        )
+                        lines.append(f'  "{field}": {json_value}')
+
+                # Write with proper comma placement
+                f.write("{\n")
+                for i, line in enumerate(lines):
+                    # Add comma for all but the last line
+                    comma = "," if i < len(lines) - 1 else ""
+                    f.write(f"{line}{comma}\n")
+                f.write("}\n")
         except OSError as e:
             raise ValueError(f"Failed to save delta metadata: {e}") from e
 
@@ -157,9 +196,7 @@ class DeltaManager:
                 for file_path, dependencies in dependency_graph.items():
                     # Store relative paths for portability
                     rel_path = str(file_path.relative_to(root_dir))
-                    dep_rel_paths = [
-                        str(dep.relative_to(root_dir)) for dep in dependencies
-                    ]
+                    dep_rel_paths = [str(dep.relative_to(root_dir)) for dep in dependencies]
                     graph_data[rel_path] = dep_rel_paths
 
                 hash_data = {
@@ -206,8 +243,7 @@ class DeltaManager:
                 dependency_graph[file_path] = dependencies
 
             file_hashes = {
-                root_dir / rel_path_str: file_hash
-                for rel_path_str, file_hash in hash_data.items()
+                root_dir / rel_path_str: file_hash for rel_path_str, file_hash in hash_data.items()
             }
 
             return dependency_graph, file_hashes
