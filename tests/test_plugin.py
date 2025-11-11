@@ -229,9 +229,102 @@ class TestDeltaManager:
             manager.update_metadata(root_dir)
 
             # Verify that GitHelper was called with search_parent_directories=True
-            mock_git_helper.assert_called_once_with(
-                root_dir, search_parent_directories=True
+            mock_git_helper.assert_called_once_with(root_dir, search_parent_directories=True)
+
+    def test_hybrid_format_save(self):
+        """Test that metadata is saved in hybrid JSON format for minimal Git diffs."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+            manager = DeltaManager(delta_file)
+
+            # Create metadata with both simple fields and large dicts
+            metadata = {
+                "last_commit": "abc123def456",
+                "last_successful_run": True,
+                "version": "1.0.0",
+                "dependency_graph": {
+                    "src/a.py": ["src/b.py", "src/c.py"],
+                    "src/b.py": ["src/c.py"],
+                    "src/c.py": [],
+                },
+                "file_hashes": {
+                    "src/a.py": "hash1",
+                    "src/b.py": "hash2",
+                    "src/c.py": "hash3",
+                },
+            }
+
+            manager.save_metadata(metadata)
+
+            # Read the file content
+            with open(delta_file, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Verify format characteristics
+            lines = content.split("\n")
+
+            # Should have few lines (compact format)
+            assert len([line for line in lines if line.strip()]) <= 8, (
+                "File should be compact with ~7-8 lines"
             )
+
+            # Simple fields should be on separate lines (readable)
+            assert any('"last_commit":' in line for line in lines)
+            assert any('"last_successful_run":' in line for line in lines)
+            assert any('"version":' in line for line in lines)
+
+            # Large dicts should be on single lines (compact)
+            dep_graph_line = [
+                line for line in lines if '"dependency_graph"' in line
+            ]
+            assert len(dep_graph_line) == 1, "dependency_graph should be on one line"
+            assert "src/a.py" in dep_graph_line[0], "dependency_graph should be compact JSON"
+
+            file_hashes_line = [line for line in lines if '"file_hashes"' in line]
+            assert len(file_hashes_line) == 1, "file_hashes should be on one line"
+
+            # Should be valid JSON
+            import json
+
+            loaded = json.loads(content)
+            assert loaded == metadata, "Loaded data should match original"
+
+    def test_hybrid_format_backward_compatibility(self):
+        """Test that old pretty-printed JSON format can still be loaded."""
+        import json
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            delta_file = Path(temp_dir) / ".delta.json"
+
+            # Create old-style pretty-printed JSON
+            old_metadata = {
+                "last_commit": "old123",
+                "last_successful_run": False,
+                "version": "0.3.0",
+                "dependency_graph": {
+                    "src/old.py": ["src/dep.py"],
+                },
+                "file_hashes": {
+                    "src/old.py": "oldhash",
+                },
+            }
+
+            # Save in old format (pretty-printed)
+            with open(delta_file, "w", encoding="utf-8") as f:
+                json.dump(old_metadata, f, indent=2, sort_keys=True)
+
+            # Load with DeltaManager (should work)
+            manager = DeltaManager(delta_file)
+            loaded = manager.load_metadata()
+
+            assert loaded == old_metadata, "Should load old format correctly"
+
+            # Now save it back (will use new format)
+            manager.save_metadata(old_metadata)
+
+            # Verify it still loads correctly
+            loaded_again = manager.load_metadata()
+            assert loaded_again == old_metadata, "Should work after re-save"
 
 
 class TestDependencyAnalyzer:
@@ -378,9 +471,7 @@ class TestDependencyAnalyzer:
 
             # Simulate a change to utils.py (the base module)
             changed_files = {utils_py}
-            affected_files = analyzer.find_affected_files(
-                changed_files, dependency_graph
-            )
+            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
 
             # All files that import utils.py should be affected
             expected_affected = {
@@ -414,9 +505,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -456,16 +547,14 @@ class TestDependencyAnalyzer:
 
             # b.py should depend on a.py
             deps = analyzer._extract_dependencies(module_b, all_files)
-            assert (
-                module_a in deps
-            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
+            assert module_a in deps, f"Expected a.py to be a dependency of b.py, but got: {deps}"
 
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert (
-                module_a in dependency_graph[module_b]
-            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            assert module_a in dependency_graph[module_b], (
+                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
+            )
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -627,9 +716,7 @@ class TestDeltaPlugin:
         plugin._analyze_changes()
 
         # Verify that GitHelper was called with search_parent_directories=True
-        mock_git_helper.assert_called_with(
-            plugin.root_dir, search_parent_directories=True
-        )
+        mock_git_helper.assert_called_with(plugin.root_dir, search_parent_directories=True)
 
         # Should not run all tests if git repo is found (but delta file doesn't exist)
         # In this case should_run_all will be True because delta file doesn't exist
@@ -820,15 +907,12 @@ class TestDeltaPlugin:
             # Simulate the affected files output logic
             if plugin.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin.root_dir))
-                    for f in sorted(plugin.affected_files)
+                    str(f.relative_to(plugin.root_dir)) for f in sorted(plugin.affected_files)
                 )
                 plugin._print_debug(f"Affected files: {affected_files_str}")
 
         # Verify _print_debug was called with affected files
-        mock_debug.assert_called_with(
-            "Affected files: src/module.py, tests/test_module.py"
-        )
+        mock_debug.assert_called_with("Affected files: src/module.py, tests/test_module.py")
 
         # Test with debug disabled - affected files should NOT be printed
         config.getoption.side_effect = lambda opt: {
@@ -852,15 +936,12 @@ class TestDeltaPlugin:
             # Simulate the affected files output logic
             if plugin2.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin2.root_dir))
-                    for f in sorted(plugin2.affected_files)
+                    str(f.relative_to(plugin2.root_dir)) for f in sorted(plugin2.affected_files)
                 )
                 plugin2._print_debug(f"Affected files: {affected_files_str}")
 
         # Verify _print_debug was called but actual print should be suppressed
-        mock_debug2.assert_called_with(
-            "Affected files: src/module.py, tests/test_module.py"
-        )
+        mock_debug2.assert_called_with("Affected files: src/module.py, tests/test_module.py")
 
         # Also verify that the actual print behavior works correctly
         mock_print.reset_mock()
@@ -946,9 +1027,7 @@ class TestDeltaPlugin:
             analyzer.print_directory_debug_info(lambda msg: print(msg))
 
             # Verify print was called with expected content
-            printed_output = "\n".join(
-                call.args[0] for call in mock_print.call_args_list
-            )
+            printed_output = "\n".join(call.args[0] for call in mock_print.call_args_list)
 
             assert "=== Directory Search Debug Information ===" in printed_output
             assert "Configured source directories: ['src']" in printed_output
@@ -1077,9 +1156,7 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5  # This will be modified
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(
-            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
-        )
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
 
         # Verify exit code was overridden
         assert session.exitstatus == pytest.ExitCode.OK
@@ -1098,9 +1175,7 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5  # Should remain unchanged
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(
-            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
-        )
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1119,9 +1194,7 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5  # Should remain unchanged
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(
-            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
-        )
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1140,9 +1213,7 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(
-            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
-        )
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1181,15 +1252,12 @@ class TestDeltaPassIfNoTests:
         session.exitstatus = 5
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(
-            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
-        )
+        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
 
         # Verify success message was printed
         printed_messages = [call.args[0] for call in mock_print.call_args_list]
         success_message_printed = any(
-            "No tests were required due to no changes - exiting with success code 0"
-            in msg
+            "No tests were required due to no changes - exiting with success code 0" in msg
             for msg in printed_messages
         )
         assert success_message_printed
@@ -1538,9 +1606,7 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(
-                temp_path, test_dirs=["unit_tests", "integration_tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -1612,9 +1678,9 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert (
-                    is_test == expected
-                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                assert is_test == expected, (
+                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
+                )
 
 
 class TestUnstagedChangesBugFix:
@@ -1639,9 +1705,7 @@ class TestUnstagedChangesBugFix:
             test_calculator_file = tests_dir / "test_calculator.py"
             test_calculator_file.write_text("from calculator import add")
 
-            analyzer = DependencyAnalyzer(
-                temp_path, source_dirs=["src"], test_dirs=["tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, source_dirs=["src"], test_dirs=["tests"])
 
             all_files = {calculator_file, test_calculator_file}
 
@@ -1660,9 +1724,7 @@ class TestUnstagedChangesBugFix:
             # Initialize git repository
             repo = Repo.init(temp_path)
             repo.config_writer().set_value("user", "name", "Test User").release()
-            repo.config_writer().set_value(
-                "user", "email", "test@example.com"
-            ).release()
+            repo.config_writer().set_value("user", "email", "test@example.com").release()
 
             # Create project structure
             src_dir = temp_path / "src"
@@ -1696,9 +1758,7 @@ def test_add():
             # Make unstaged change to source file
             calculator_file.write_text("def add(x, y):\n    return x + y + 1\n")
 
-            analyzer = DependencyAnalyzer(
-                temp_path, source_dirs=[".", "src"], test_dirs=["tests"]
-            )
+            analyzer = DependencyAnalyzer(temp_path, source_dirs=[".", "src"], test_dirs=["tests"])
 
             # Build dependency graph
             dependency_graph = analyzer.build_dependency_graph()
@@ -1709,9 +1769,7 @@ def test_add():
 
             # When source file changes, test file should be affected
             changed_files = {calculator_file}
-            affected_files = analyzer.find_affected_files(
-                changed_files, dependency_graph
-            )
+            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
 
             # Both source and test files should be affected
             assert calculator_file in affected_files
