@@ -633,6 +633,37 @@ class TestDependencyAnalyzer:
             file_names = {f.name for f in python_files}
             assert file_names == {"module1.py", "generated.py"}
 
+    def test_resolve_import_handles_empty_names(self):
+        """Test that _resolve_import_to_file handles empty or invalid import names gracefully."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test structure
+            src_dir = temp_path / "src"
+            src_dir.mkdir()
+            (src_dir / "module1.py").touch()
+
+            analyzer = DependencyAnalyzer(temp_path)
+            all_files = {src_dir / "module1.py"}
+
+            # Test cases that previously caused "PosixPath('.') has an empty name" error
+            test_cases = [
+                "",           # Empty string
+                ".",          # Just a dot (relative import marker)
+                "..",         # Two dots
+                "...",        # Three dots
+                "    ",       # Whitespace only
+                ".module",    # Leading dot
+                "module.",    # Trailing dot
+            ]
+
+            for import_name in test_cases:
+                # Should return None without raising an error
+                result = analyzer._resolve_import_to_file(import_name, all_files)
+                assert result is None, (
+                    f"Expected None for invalid import name {repr(import_name)}, got {result}"
+                )
+
 
 class TestDeltaPlugin:
     """Test cases for DeltaPlugin main functionality."""

@@ -731,17 +731,37 @@ class DependencyAnalyzer:
         self, import_name: str, all_files: Set[Path]
     ) -> Path | None:
         """Resolve an import name to an actual file path."""
+        # Handle empty or invalid import names
+        if not import_name or not import_name.strip():
+            return None
+        
         # Convert module name to potential file paths
         parts = import_name.split(".")
+        
+        # Filter out empty parts (e.g., from relative imports like "." or "..")
+        # These should have been handled by _resolve_relative_import already
+        parts = [part for part in parts if part]
+        
+        # If no valid parts remain after filtering, cannot resolve
+        if not parts:
+            return None
 
         # Try different combinations to find the file
         potential_paths = []
 
         # Try as a direct module file
-        potential_paths.append(Path(*parts).with_suffix(".py"))
+        try:
+            potential_paths.append(Path(*parts).with_suffix(".py"))
+        except (ValueError, TypeError):
+            # Skip if Path construction fails
+            pass
 
         # Try as a package with __init__.py
-        potential_paths.append(Path(*parts) / "__init__.py")
+        try:
+            potential_paths.append(Path(*parts) / "__init__.py")
+        except (ValueError, TypeError):
+            # Skip if Path construction fails
+            pass
 
         # Try in configured source directories
         for source_dir in self.source_dirs:
@@ -749,8 +769,14 @@ class DependencyAnalyzer:
                 # Already handled above for direct paths
                 continue
             source_path = Path(source_dir)
-            potential_paths.append(source_path / Path(*parts) / "__init__.py")
-            potential_paths.append((source_path / Path(*parts)).with_suffix(".py"))
+            try:
+                potential_paths.append(source_path / Path(*parts) / "__init__.py")
+            except (ValueError, TypeError):
+                pass
+            try:
+                potential_paths.append((source_path / Path(*parts)).with_suffix(".py"))
+            except (ValueError, TypeError):
+                pass
 
         # Search for matches in all known files
         for potential_path in potential_paths:
