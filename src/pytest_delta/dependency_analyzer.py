@@ -718,8 +718,8 @@ class DependencyAnalyzer:
         # Convert module name to potential file paths
         parts = import_name.split(".")
 
-        # Filter out empty parts (e.g., from relative imports like "." or "..")
-        # These should have been handled by _resolve_relative_import already
+        # Filter out empty parts (e.g., from malformed imports or edge cases)
+        # This handles cases like ".", "..", or imports with trailing/leading dots
         parts = [part for part in parts if part]
 
         # If no valid parts remain after filtering, cannot resolve
