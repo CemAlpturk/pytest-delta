@@ -102,9 +102,7 @@ class GitHelper:
             return result
         except subprocess.CalledProcessError as e:
             raise GitCommandError(
-                f"Git command failed: {' '.join(cmd)}\n"
-                f"Exit code: {e.returncode}\n"
-                f"Error: {e.stderr}"
+                f"Git command failed: {' '.join(cmd)}\nExit code: {e.returncode}\nError: {e.stderr}"
             ) from e
         except FileNotFoundError as e:
             raise GitCommandError("Git executable not found") from e
@@ -181,9 +179,7 @@ class GitHelper:
 
         try:
             # Get staged changes
-            result = self._run_git_command(
-                ["diff", "--cached", "--name-only", "HEAD"], check=False
-            )
+            result = self._run_git_command(["diff", "--cached", "--name-only", "HEAD"], check=False)
 
             if result.returncode == 0:
                 for line in result.stdout.splitlines():

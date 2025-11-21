@@ -194,13 +194,9 @@ class DependencyAnalyzer:
         # Track statistics
         self._debug_info["incremental_added_files"] = len(added_files)
         self._debug_info["incremental_removed_files"] = len(removed_files)
-        self._debug_info["incremental_modified_files"] = len(
-            changed_files - added_files
-        )
+        self._debug_info["incremental_modified_files"] = len(changed_files - added_files)
         self._debug_info["incremental_reparsed_files"] = len(files_to_reparse)
-        self._debug_info["incremental_reused_files"] = len(all_files) - len(
-            files_to_reparse
-        )
+        self._debug_info["incremental_reused_files"] = len(all_files) - len(files_to_reparse)
 
         return new_graph, files_to_reparse, current_hashes
 
@@ -265,9 +261,7 @@ class DependencyAnalyzer:
 
         return dependencies, False
 
-    def _parse_file_dependencies(
-        self, file_path: Path, all_files: Set[Path]
-    ) -> Set[Path]:
+    def _parse_file_dependencies(self, file_path: Path, all_files: Set[Path]) -> Set[Path]:
         """
         Parse a Python file and extract its dependencies.
         This is the actual parsing logic separated from caching.
@@ -328,9 +322,7 @@ class DependencyAnalyzer:
                         resolved_module = node.module
 
                     if resolved_module:
-                        dep_path = self._resolve_import_to_file(
-                            resolved_module, all_files
-                        )
+                        dep_path = self._resolve_import_to_file(resolved_module, all_files)
                         if dep_path:
                             dependencies.add(dep_path)
 
@@ -406,9 +398,7 @@ class DependencyAnalyzer:
         print_func("=== Directory Search Debug Information ===")
 
         # Configured directories
-        print_func(
-            f"Configured source directories: {debug_info['configured_source_dirs']}"
-        )
+        print_func(f"Configured source directories: {debug_info['configured_source_dirs']}")
         print_func(f"Configured test directories: {debug_info['configured_test_dirs']}")
 
         # Directories actually searched
@@ -433,11 +423,11 @@ class DependencyAnalyzer:
 
         # Excluded files (by built-in patterns)
         if debug_info["excluded_files"]:
-            excluded_summary = f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
+            excluded_summary = (
+                f"{len(debug_info['excluded_files'])} files excluded by built-in patterns"
+            )
             if len(debug_info["excluded_files"]) <= 5:
-                print_func(
-                    f"{excluded_summary}: {', '.join(debug_info['excluded_files'])}"
-                )
+                print_func(f"{excluded_summary}: {', '.join(debug_info['excluded_files'])}")
             else:
                 print_func(
                     f"{excluded_summary} (showing first 5): {', '.join(debug_info['excluded_files'][:5])}"
@@ -445,13 +435,9 @@ class DependencyAnalyzer:
 
         # Ignored files (by user patterns)
         if debug_info["ignored_files"]:
-            ignored_summary = (
-                f"{len(debug_info['ignored_files'])} files ignored by user patterns"
-            )
+            ignored_summary = f"{len(debug_info['ignored_files'])} files ignored by user patterns"
             if len(debug_info["ignored_files"]) <= 5:
-                print_func(
-                    f"{ignored_summary}: {', '.join(debug_info['ignored_files'])}"
-                )
+                print_func(f"{ignored_summary}: {', '.join(debug_info['ignored_files'])}")
             else:
                 print_func(
                     f"{ignored_summary} (showing first 5): {', '.join(debug_info['ignored_files'][:5])}"
@@ -561,9 +547,7 @@ class DependencyAnalyzer:
 
         for search_dir in search_dirs:
             if search_dir.is_dir():
-                self._debug_info["searched_dirs"].append(
-                    str(search_dir.relative_to(self.root_dir))
-                )
+                self._debug_info["searched_dirs"].append(str(search_dir.relative_to(self.root_dir)))
                 files_found_in_dir = 0
 
                 # If search_dir is the root directory, only get .py files directly in root (not recursive)
@@ -587,9 +571,7 @@ class DependencyAnalyzer:
                 self._debug_info["directory_file_counts"][dir_name] = files_found_in_dir
             else:
                 # Directory doesn't exist or isn't a directory
-                self._debug_info["skipped_dirs"].append(
-                    str(search_dir.relative_to(self.root_dir))
-                )
+                self._debug_info["skipped_dirs"].append(str(search_dir.relative_to(self.root_dir)))
 
         # Filter out __pycache__, .venv, and other irrelevant files
         filtered_files = set()
@@ -727,21 +709,39 @@ class DependencyAnalyzer:
         dependencies, _ = self._get_cached_dependencies(file_path, all_files)
         return dependencies
 
-    def _resolve_import_to_file(
-        self, import_name: str, all_files: Set[Path]
-    ) -> Path | None:
+    def _resolve_import_to_file(self, import_name: str, all_files: Set[Path]) -> Path | None:
         """Resolve an import name to an actual file path."""
+        # Handle empty or invalid import names
+        if not import_name or not import_name.strip():
+            return None
+
         # Convert module name to potential file paths
         parts = import_name.split(".")
+
+        # Filter out empty parts (e.g., from malformed imports or edge cases)
+        # This handles cases like ".", "..", or imports with trailing/leading dots
+        parts = [part for part in parts if part]
+
+        # If no valid parts remain after filtering, cannot resolve
+        if not parts:
+            return None
 
         # Try different combinations to find the file
         potential_paths = []
 
         # Try as a direct module file
-        potential_paths.append(Path(*parts).with_suffix(".py"))
+        try:
+            potential_paths.append(Path(*parts).with_suffix(".py"))
+        except (ValueError, TypeError):
+            # Skip if Path construction fails
+            pass
 
         # Try as a package with __init__.py
-        potential_paths.append(Path(*parts) / "__init__.py")
+        try:
+            potential_paths.append(Path(*parts) / "__init__.py")
+        except (ValueError, TypeError):
+            # Skip if Path construction fails
+            pass
 
         # Try in configured source directories
         for source_dir in self.source_dirs:
@@ -749,8 +749,14 @@ class DependencyAnalyzer:
                 # Already handled above for direct paths
                 continue
             source_path = Path(source_dir)
-            potential_paths.append(source_path / Path(*parts) / "__init__.py")
-            potential_paths.append((source_path / Path(*parts)).with_suffix(".py"))
+            try:
+                potential_paths.append(source_path / Path(*parts) / "__init__.py")
+            except (ValueError, TypeError):
+                pass
+            try:
+                potential_paths.append((source_path / Path(*parts)).with_suffix(".py"))
+            except (ValueError, TypeError):
+                pass
 
         # Search for matches in all known files
         for potential_path in potential_paths:
@@ -768,9 +774,9 @@ class DependencyAnalyzer:
                     file_relative = file_path.relative_to(self.root_dir)
                     # Check if the relative path matches the potential path exactly
                     # or if it's in a subdirectory structure that matches
-                    if str(file_relative) == str(potential_path) or str(
-                        file_relative
-                    ).endswith("/" + str(potential_path)):
+                    if str(file_relative) == str(potential_path) or str(file_relative).endswith(
+                        "/" + str(potential_path)
+                    ):
                         return file_path
                 except ValueError:
                     continue
@@ -799,9 +805,7 @@ class DependencyAnalyzer:
             return None
 
         base_parts = (
-            current_dir_parts[:-levels_to_go_up]
-            if levels_to_go_up > 0
-            else current_dir_parts
+            current_dir_parts[:-levels_to_go_up] if levels_to_go_up > 0 else current_dir_parts
         )
 
         if module_name:
