@@ -274,9 +274,7 @@ class TestDeltaManager:
             assert any('"version":' in line for line in lines)
 
             # Large dicts should be on single lines (compact)
-            dep_graph_line = [
-                line for line in lines if '"dependency_graph"' in line
-            ]
+            dep_graph_line = [line for line in lines if '"dependency_graph"' in line]
             assert len(dep_graph_line) == 1, "dependency_graph should be on one line"
             assert "src/a.py" in dep_graph_line[0], "dependency_graph should be compact JSON"
 
@@ -648,13 +646,13 @@ class TestDependencyAnalyzer:
 
             # Test cases that previously caused "PosixPath('.') has an empty name" error
             test_cases = [
-                "",           # Empty string
-                ".",          # Just a dot (relative import marker)
-                "..",         # Two dots
-                "...",        # Three dots
-                "    ",       # Whitespace only
-                ".module",    # Leading dot
-                "module.",    # Trailing dot
+                "",  # Empty string
+                ".",  # Just a dot (relative import marker)
+                "..",  # Two dots
+                "...",  # Three dots
+                "    ",  # Whitespace only
+                ".module",  # Leading dot
+                "module.",  # Trailing dot
             ]
 
             for import_name in test_cases:

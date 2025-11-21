@@ -189,11 +189,7 @@ class DependencyVisualizer:
         # Statistics
         total_files = len(dependency_graph)
         total_deps = sum(len(deps) for deps in dependency_graph.values())
-        max_deps = (
-            max(len(deps) for deps in dependency_graph.values())
-            if dependency_graph
-            else 0
-        )
+        max_deps = max(len(deps) for deps in dependency_graph.values()) if dependency_graph else 0
 
         lines.append(
             f"Files: {total_files} | Dependencies: {total_deps} | Max per file: {max_deps}"
@@ -202,8 +198,7 @@ class DependencyVisualizer:
 
         # Show files with most dependencies (top 10)
         files_with_deps = [
-            (file_path, len(dependencies))
-            for file_path, dependencies in dependency_graph.items()
+            (file_path, len(dependencies)) for file_path, dependencies in dependency_graph.items()
         ]
         files_with_deps.sort(key=lambda x: x[1], reverse=True)
 
