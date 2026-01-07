@@ -29,3 +29,6 @@ MANIFEST
 # Generated visualization files
 dependency_graph.dot
 dependency_summary.txt
+
+.mypy_cache/
+.ruff_cache/
