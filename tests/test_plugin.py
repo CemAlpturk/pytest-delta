@@ -1086,7 +1086,8 @@ class TestDeltaPlugin:
         """Test that debug flag alone registers the plugin."""
         from pytest_delta.plugin import pytest_configure
 
-        config = Mock()
+        # Use spec to ensure config doesn't have workerinput (not xdist worker)
+        config = Mock(spec=["getoption", "pluginmanager"])
         config.getoption.side_effect = lambda opt: {
             "--delta": False,
             "--delta-vis": False,
@@ -1097,6 +1098,8 @@ class TestDeltaPlugin:
             "--delta-ignore": [],
             "--delta-source-dirs": [],
             "--delta-test-dirs": [],
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": False,
         }.get(opt, [])
 
         config.pluginmanager = Mock()
@@ -1935,3 +1938,48 @@ class TestXdistCompatibility:
 
         # Verify success message was printed
         mock_print.assert_any_call("[pytest-delta] Delta metadata updated successfully")
+
+    def test_pytest_configure_skips_plugin_on_xdist_worker(self):
+        """Test that pytest_configure skips registering plugin on xdist workers."""
+        from pytest_delta.plugin import pytest_configure
+
+        # Mock config as xdist worker (has workerinput)
+        worker_config = Mock()
+        worker_config.workerinput = {"workerid": "gw0"}
+        worker_config.getoption.side_effect = lambda opt: {
+            "--delta": True,
+            "--delta-vis": False,
+            "--delta-debug": False,
+        }.get(opt, False)
+
+        # Call pytest_configure - should NOT register plugin
+        pytest_configure(worker_config)
+
+        # Verify plugin was NOT registered on worker
+        worker_config.pluginmanager.register.assert_not_called()
+
+    def test_pytest_configure_registers_plugin_on_controller(self):
+        """Test that pytest_configure registers plugin on controller/non-xdist."""
+        from pytest_delta.plugin import pytest_configure
+
+        # Mock config as controller (no workerinput attribute)
+        controller_config = Mock(spec=["getoption", "pluginmanager"])
+        controller_config.getoption.side_effect = lambda opt: {
+            "--delta": True,
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": False,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }.get(opt, [])
+
+        # Call pytest_configure - should register plugin
+        pytest_configure(controller_config)
+
+        # Verify plugin WAS registered on controller
+        controller_config.pluginmanager.register.assert_called_once()
