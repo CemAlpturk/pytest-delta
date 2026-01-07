@@ -89,6 +89,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure the plugin if --delta flag is used."""
+    # Skip registering on xdist workers - only controller needs the plugin
+    # Workers receive already-filtered test list from controller
+    if hasattr(config, "workerinput"):
+        return
+
     if (
         config.getoption("--delta")
         or config.getoption("--delta-vis")

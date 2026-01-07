@@ -86,9 +86,7 @@ class DeltaManager:
                                             if isinstance(node.value, ast.Constant):
                                                 value = node.value.value
                                                 return (
-                                                    str(value)
-                                                    if isinstance(value, str)
-                                                    else None
+                                                    str(value) if isinstance(value, str) else None
                                                 )
                         except Exception:
                             continue
@@ -221,9 +219,7 @@ class DeltaManager:
                 for file_path, dependencies in dependency_graph.items():
                     # Store relative paths for portability
                     rel_path = str(file_path.relative_to(root_dir))
-                    dep_rel_paths = [
-                        str(dep.relative_to(root_dir)) for dep in dependencies
-                    ]
+                    dep_rel_paths = [str(dep.relative_to(root_dir)) for dep in dependencies]
                     graph_data[rel_path] = dep_rel_paths
 
                 hash_data = {
@@ -270,8 +266,7 @@ class DeltaManager:
                 dependency_graph[file_path] = dependencies
 
             file_hashes = {
-                root_dir / rel_path_str: file_hash
-                for rel_path_str, file_hash in hash_data.items()
+                root_dir / rel_path_str: file_hash for rel_path_str, file_hash in hash_data.items()
             }
 
             return dependency_graph, file_hashes
