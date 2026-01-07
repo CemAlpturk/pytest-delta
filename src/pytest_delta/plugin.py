@@ -147,6 +147,35 @@ class DeltaPlugin:
         # Track if no tests were run due to delta analysis
         self.no_tests_due_to_delta = False
 
+        # Track if analysis has been performed
+        self._analysis_done = False
+
+    def pytest_sessionstart(self, session: pytest.Session) -> None:
+        """Run analysis early so results are available for xdist node configuration."""
+        if self.config.getoption("--delta") and not self._analysis_done:
+            self._analyze_changes()
+            self._analysis_done = True
+
+    def pytest_configure_node(self, node) -> None:
+        """Called on controller to configure each xdist worker node.
+
+        This passes the computed affected files to workers so they can filter tests.
+        """
+        # Ensure analysis is done before configuring nodes
+        if not self._analysis_done and self.config.getoption("--delta"):
+            self._analyze_changes()
+            self._analysis_done = True
+
+        if self.should_run_all:
+            # Tell workers to run all tests
+            node.workerinput["delta_affected_files"] = "__ALL__"
+        elif self.affected_files:
+            # Pass affected file paths as strings (serializable)
+            node.workerinput["delta_affected_files"] = [str(f) for f in self.affected_files]
+        else:
+            # No affected files - workers will skip all tests
+            node.workerinput["delta_affected_files"] = []
+
     def pytest_collection_modifyitems(
         self, config: pytest.Config, items: List[pytest.Item]
     ) -> None:
@@ -160,8 +189,10 @@ class DeltaPlugin:
             if not config.getoption("--delta"):
                 return
 
-            # Try to determine which files are affected
-            self._analyze_changes()
+            # Run analysis if not already done (e.g., non-xdist runs)
+            if not self._analysis_done:
+                self._analyze_changes()
+                self._analysis_done = True
 
             if self.should_run_all:
                 # Run all tests and regenerate delta file
@@ -186,8 +217,7 @@ class DeltaPlugin:
 
             if filtered_count > 0:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir))
-                    for f in sorted(self.affected_files)
+                    str(f.relative_to(self.root_dir)) for f in sorted(self.affected_files)
                 )
                 self._print_debug(f"Affected files: {affected_files_str}")
 
@@ -234,9 +264,7 @@ class DeltaPlugin:
             if not self.no_save:
                 try:
                     # Save dependency graph along with metadata if available
-                    if hasattr(self, "dependency_graph") and hasattr(
-                        self, "file_hashes"
-                    ):
+                    if hasattr(self, "dependency_graph") and hasattr(self, "file_hashes"):
                         self.delta_manager.update_metadata(
                             self.root_dir, self.dependency_graph, self.file_hashes
                         )
@@ -246,9 +274,7 @@ class DeltaPlugin:
                 except Exception as e:
                     self._print_warning(f"Failed to update delta metadata: {e}")
             else:
-                self._print_info(
-                    "Delta metadata update skipped (--delta-no-save enabled)"
-                )
+                self._print_info("Delta metadata update skipped (--delta-no-save enabled)")
 
     def _analyze_changes(self) -> None:
         """Analyze what files have changed and determine affected files."""
@@ -296,9 +322,7 @@ class DeltaPlugin:
             changed_test_files = {f for f in changed_files if f in test_files}
 
             # Build dependency graph - use incremental if possible
-            previous_graph_data = self.delta_manager.load_dependency_graph(
-                self.root_dir
-            )
+            previous_graph_data = self.delta_manager.load_dependency_graph(self.root_dir)
 
             if previous_graph_data is not None and not self.force_regenerate:
                 # Use incremental update
@@ -310,9 +334,7 @@ class DeltaPlugin:
                 ) = self.dependency_analyzer.build_dependency_graph_incremental(
                     previous_graph, previous_hashes
                 )
-                self._print_debug(
-                    f"Incremental graph update: reparsed {len(reparsed_files)} files"
-                )
+                self._print_debug(f"Incremental graph update: reparsed {len(reparsed_files)} files")
             else:
                 # Full rebuild
                 dependency_graph = self.dependency_analyzer.build_dependency_graph()
@@ -391,15 +413,11 @@ class DeltaPlugin:
             print("\n" + console_output)
 
             # Save DOT format file
-            dot_file = self.visualizer.save_visualization(
-                dependency_graph, format="dot"
-            )
+            dot_file = self.visualizer.save_visualization(dependency_graph, format="dot")
             self._print_info(f"DOT format saved to: {dot_file}")
 
             # Save text summary
-            txt_file = self.visualizer.save_visualization(
-                dependency_graph, format="txt"
-            )
+            txt_file = self.visualizer.save_visualization(dependency_graph, format="txt")
             self._print_info(f"Text summary saved to: {txt_file}")
 
             self._print_info("Visualization complete!")
@@ -423,8 +441,7 @@ class DeltaPlugin:
 
             if self.changed_source_files:
                 source_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir))
-                    for f in sorted(self.changed_source_files)
+                    str(f.relative_to(self.root_dir)) for f in sorted(self.changed_source_files)
                 )
                 self._print_debug(
                     f"Changed source files ({len(self.changed_source_files)}): {source_files_str}"
@@ -434,8 +451,7 @@ class DeltaPlugin:
 
             if self.changed_test_files:
                 test_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir))
-                    for f in sorted(self.changed_test_files)
+                    str(f.relative_to(self.root_dir)) for f in sorted(self.changed_test_files)
                 )
                 self._print_debug(
                     f"Changed test files ({len(self.changed_test_files)}): {test_files_str}"
@@ -464,16 +480,12 @@ class DeltaPlugin:
 
             # Determine which test files will be selected
             for test_file in all_test_files:
-                if (
-                    test_file in self.changed_test_files
-                    or test_file in self.affected_files
-                ):
+                if test_file in self.changed_test_files or test_file in self.affected_files:
                     selected_test_files.add(test_file)
 
             if selected_test_files:
                 selected_test_files_str = ", ".join(
-                    str(f.relative_to(self.root_dir))
-                    for f in sorted(selected_test_files)
+                    str(f.relative_to(self.root_dir)) for f in sorted(selected_test_files)
                 )
                 self._print_debug(
                     f"Test files to be run ({len(selected_test_files)}): {selected_test_files_str}"
