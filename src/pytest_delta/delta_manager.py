@@ -7,6 +7,8 @@ including the git commit hash and other relevant information.
 
 import ast
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -84,7 +86,9 @@ class DeltaManager:
                                             if isinstance(node.value, ast.Constant):
                                                 value = node.value.value
                                                 return (
-                                                    str(value) if isinstance(value, str) else None
+                                                    str(value)
+                                                    if isinstance(value, str)
+                                                    else None
                                                 )
                         except Exception:
                             continue
@@ -113,46 +117,67 @@ class DeltaManager:
         - Compact single-line format for large dictionaries (dependency_graph, file_hashes)
 
         This minimizes Git diff impact while maintaining JSON compatibility.
+
+        Uses atomic write (temp file + rename) to prevent corruption from
+        concurrent access or interrupted writes (e.g., pytest-xdist).
         """
         try:
             # Ensure parent directory exists
             self.delta_file.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.delta_file, "w", encoding="utf-8") as f:
-                # Collect all fields to write in order
-                lines = []
+            # Write to a temporary file first, then atomically rename
+            # This prevents corruption if the write is interrupted
+            fd, tmp_path = tempfile.mkstemp(
+                suffix=".tmp",
+                prefix=".delta_",
+                dir=self.delta_file.parent,
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    # Collect all fields to write in order
+                    lines = []
 
-                # Simple scalar fields - readable format
-                simple_fields = ["last_commit", "last_successful_run", "version"]
-                for field in simple_fields:
-                    if field in metadata:
-                        value = metadata[field]
-                        # Format value appropriately
-                        if isinstance(value, str):
-                            json_value = json.dumps(value)
-                        elif isinstance(value, bool):
-                            json_value = "true" if value else "false"
-                        else:
-                            json_value = json.dumps(value)
-                        lines.append(f'  "{field}": {json_value}')
+                    # Simple scalar fields - readable format
+                    simple_fields = ["last_commit", "last_successful_run", "version"]
+                    for field in simple_fields:
+                        if field in metadata:
+                            value = metadata[field]
+                            # Format value appropriately
+                            if isinstance(value, str):
+                                json_value = json.dumps(value)
+                            elif isinstance(value, bool):
+                                json_value = "true" if value else "false"
+                            else:
+                                json_value = json.dumps(value)
+                            lines.append(f'  "{field}": {json_value}')
 
-                # Large dictionary fields - compact single-line format
-                dict_fields = ["dependency_graph", "file_hashes"]
-                for field in dict_fields:
-                    if field in metadata:
-                        # Compact JSON without spaces
-                        json_value = json.dumps(
-                            metadata[field], sort_keys=True, separators=(",", ":")
-                        )
-                        lines.append(f'  "{field}": {json_value}')
+                    # Large dictionary fields - compact single-line format
+                    dict_fields = ["dependency_graph", "file_hashes"]
+                    for field in dict_fields:
+                        if field in metadata:
+                            # Compact JSON without spaces
+                            json_value = json.dumps(
+                                metadata[field], sort_keys=True, separators=(",", ":")
+                            )
+                            lines.append(f'  "{field}": {json_value}')
 
-                # Write with proper comma placement
-                f.write("{\n")
-                for i, line in enumerate(lines):
-                    # Add comma for all but the last line
-                    comma = "," if i < len(lines) - 1 else ""
-                    f.write(f"{line}{comma}\n")
-                f.write("}\n")
+                    # Write with proper comma placement
+                    f.write("{\n")
+                    for i, line in enumerate(lines):
+                        # Add comma for all but the last line
+                        comma = "," if i < len(lines) - 1 else ""
+                        f.write(f"{line}{comma}\n")
+                    f.write("}\n")
+
+                # Atomically replace the target file
+                os.replace(tmp_path, self.delta_file)
+            except BaseException:
+                # Clean up temp file on any error
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except OSError as e:
             raise ValueError(f"Failed to save delta metadata: {e}") from e
 
@@ -196,7 +221,9 @@ class DeltaManager:
                 for file_path, dependencies in dependency_graph.items():
                     # Store relative paths for portability
                     rel_path = str(file_path.relative_to(root_dir))
-                    dep_rel_paths = [str(dep.relative_to(root_dir)) for dep in dependencies]
+                    dep_rel_paths = [
+                        str(dep.relative_to(root_dir)) for dep in dependencies
+                    ]
                     graph_data[rel_path] = dep_rel_paths
 
                 hash_data = {
@@ -243,7 +270,8 @@ class DeltaManager:
                 dependency_graph[file_path] = dependencies
 
             file_hashes = {
-                root_dir / rel_path_str: file_hash for rel_path_str, file_hash in hash_data.items()
+                root_dir / rel_path_str: file_hash
+                for rel_path_str, file_hash in hash_data.items()
             }
 
             return dependency_graph, file_hashes

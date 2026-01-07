@@ -229,7 +229,9 @@ class TestDeltaManager:
             manager.update_metadata(root_dir)
 
             # Verify that GitHelper was called with search_parent_directories=True
-            mock_git_helper.assert_called_once_with(root_dir, search_parent_directories=True)
+            mock_git_helper.assert_called_once_with(
+                root_dir, search_parent_directories=True
+            )
 
     def test_hybrid_format_save(self):
         """Test that metadata is saved in hybrid JSON format for minimal Git diffs."""
@@ -264,9 +266,9 @@ class TestDeltaManager:
             lines = content.split("\n")
 
             # Should have few lines (compact format)
-            assert len([line for line in lines if line.strip()]) <= 8, (
-                "File should be compact with ~7-8 lines"
-            )
+            assert (
+                len([line for line in lines if line.strip()]) <= 8
+            ), "File should be compact with ~7-8 lines"
 
             # Simple fields should be on separate lines (readable)
             assert any('"last_commit":' in line for line in lines)
@@ -276,7 +278,9 @@ class TestDeltaManager:
             # Large dicts should be on single lines (compact)
             dep_graph_line = [line for line in lines if '"dependency_graph"' in line]
             assert len(dep_graph_line) == 1, "dependency_graph should be on one line"
-            assert "src/a.py" in dep_graph_line[0], "dependency_graph should be compact JSON"
+            assert (
+                "src/a.py" in dep_graph_line[0]
+            ), "dependency_graph should be compact JSON"
 
             file_hashes_line = [line for line in lines if '"file_hashes"' in line]
             assert len(file_hashes_line) == 1, "file_hashes should be on one line"
@@ -469,7 +473,9 @@ class TestDependencyAnalyzer:
 
             # Simulate a change to utils.py (the base module)
             changed_files = {utils_py}
-            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+            affected_files = analyzer.find_affected_files(
+                changed_files, dependency_graph
+            )
 
             # All files that import utils.py should be affected
             expected_affected = {
@@ -503,9 +509,9 @@ class TestDependencyAnalyzer:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
     def test_extract_dependencies_simple_import(self):
         """Test extracting dependencies from simple imports."""
@@ -545,14 +551,16 @@ class TestDependencyAnalyzer:
 
             # b.py should depend on a.py
             deps = analyzer._extract_dependencies(module_b, all_files)
-            assert module_a in deps, f"Expected a.py to be a dependency of b.py, but got: {deps}"
+            assert (
+                module_a in deps
+            ), f"Expected a.py to be a dependency of b.py, but got: {deps}"
 
             # Test the full dependency graph
             dependency_graph = analyzer.build_dependency_graph()
             assert module_b in dependency_graph, "b.py should be in dependency graph"
-            assert module_a in dependency_graph[module_b], (
-                f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
-            )
+            assert (
+                module_a in dependency_graph[module_b]
+            ), f"a.py should be a dependency of b.py in graph, but got: {dependency_graph[module_b]}"
 
     def test_find_affected_files(self):
         """Test finding affected files based on changes."""
@@ -658,9 +666,9 @@ class TestDependencyAnalyzer:
             for import_name in test_cases:
                 # Should return None without raising an error
                 result = analyzer._resolve_import_to_file(import_name, all_files)
-                assert result is None, (
-                    f"Expected None for invalid import name {repr(import_name)}, got {result}"
-                )
+                assert (
+                    result is None
+                ), f"Expected None for invalid import name {repr(import_name)}, got {result}"
 
 
 class TestDeltaPlugin:
@@ -745,7 +753,9 @@ class TestDeltaPlugin:
         plugin._analyze_changes()
 
         # Verify that GitHelper was called with search_parent_directories=True
-        mock_git_helper.assert_called_with(plugin.root_dir, search_parent_directories=True)
+        mock_git_helper.assert_called_with(
+            plugin.root_dir, search_parent_directories=True
+        )
 
         # Should not run all tests if git repo is found (but delta file doesn't exist)
         # In this case should_run_all will be True because delta file doesn't exist
@@ -936,12 +946,15 @@ class TestDeltaPlugin:
             # Simulate the affected files output logic
             if plugin.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin.root_dir)) for f in sorted(plugin.affected_files)
+                    str(f.relative_to(plugin.root_dir))
+                    for f in sorted(plugin.affected_files)
                 )
                 plugin._print_debug(f"Affected files: {affected_files_str}")
 
         # Verify _print_debug was called with affected files
-        mock_debug.assert_called_with("Affected files: src/module.py, tests/test_module.py")
+        mock_debug.assert_called_with(
+            "Affected files: src/module.py, tests/test_module.py"
+        )
 
         # Test with debug disabled - affected files should NOT be printed
         config.getoption.side_effect = lambda opt: {
@@ -965,12 +978,15 @@ class TestDeltaPlugin:
             # Simulate the affected files output logic
             if plugin2.affected_files:
                 affected_files_str = ", ".join(
-                    str(f.relative_to(plugin2.root_dir)) for f in sorted(plugin2.affected_files)
+                    str(f.relative_to(plugin2.root_dir))
+                    for f in sorted(plugin2.affected_files)
                 )
                 plugin2._print_debug(f"Affected files: {affected_files_str}")
 
         # Verify _print_debug was called but actual print should be suppressed
-        mock_debug2.assert_called_with("Affected files: src/module.py, tests/test_module.py")
+        mock_debug2.assert_called_with(
+            "Affected files: src/module.py, tests/test_module.py"
+        )
 
         # Also verify that the actual print behavior works correctly
         mock_print.reset_mock()
@@ -1056,7 +1072,9 @@ class TestDeltaPlugin:
             analyzer.print_directory_debug_info(lambda msg: print(msg))
 
             # Verify print was called with expected content
-            printed_output = "\n".join(call.args[0] for call in mock_print.call_args_list)
+            printed_output = "\n".join(
+                call.args[0] for call in mock_print.call_args_list
+            )
 
             assert "=== Directory Search Debug Information ===" in printed_output
             assert "Configured source directories: ['src']" in printed_output
@@ -1179,13 +1197,16 @@ class TestDeltaPassIfNoTests:
         plugin.pass_if_no_tests = True
         plugin.no_tests_due_to_delta = True
 
-        # Mock session object
+        # Mock session object - configure config to not have workerinput (not xdist worker)
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 0
         session.exitstatus = 5  # This will be modified
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was overridden
         assert session.exitstatus == pytest.ExitCode.OK
@@ -1198,13 +1219,16 @@ class TestDeltaPassIfNoTests:
         plugin.pass_if_no_tests = False
         plugin.no_tests_due_to_delta = True
 
-        # Mock session object
+        # Mock session object - configure config to not have workerinput (not xdist worker)
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 0
         session.exitstatus = 5  # Should remain unchanged
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1217,13 +1241,16 @@ class TestDeltaPassIfNoTests:
         plugin.pass_if_no_tests = True
         plugin.no_tests_due_to_delta = False  # Not due to delta analysis
 
-        # Mock session object
+        # Mock session object - configure config to not have workerinput (not xdist worker)
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 0
         session.exitstatus = 5  # Should remain unchanged
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1236,13 +1263,16 @@ class TestDeltaPassIfNoTests:
         plugin.pass_if_no_tests = True
         plugin.no_tests_due_to_delta = True
 
-        # Mock session object with tests collected
+        # Mock session object with tests collected - configure config to not have workerinput
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 5  # Tests were collected
         session.exitstatus = 5
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify exit code was NOT overridden
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
@@ -1255,8 +1285,9 @@ class TestDeltaPassIfNoTests:
         plugin.pass_if_no_tests = True
         plugin.no_tests_due_to_delta = True
 
-        # Mock session object
+        # Mock session object - configure config to not have workerinput
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 0
         session.exitstatus = 1  # Different exit code (tests failed)
 
@@ -1275,18 +1306,22 @@ class TestDeltaPassIfNoTests:
         plugin.pass_if_no_tests = True
         plugin.no_tests_due_to_delta = True
 
-        # Mock session object
+        # Mock session object - configure config to not have workerinput
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 0
         session.exitstatus = 5
 
         # Call pytest_sessionfinish
-        plugin.pytest_sessionfinish(session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)
+        plugin.pytest_sessionfinish(
+            session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED
+        )
 
         # Verify success message was printed
         printed_messages = [call.args[0] for call in mock_print.call_args_list]
         success_message_printed = any(
-            "No tests were required due to no changes - exiting with success code 0" in msg
+            "No tests were required due to no changes - exiting with success code 0"
+            in msg
             for msg in printed_messages
         )
         assert success_message_printed
@@ -1464,7 +1499,9 @@ class TestDeltaNoSave:
         plugin = DeltaPlugin(config)
         plugin.delta_manager = Mock()
 
+        # Mock session object - configure config to not have workerinput (not xdist worker)
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 1
 
         # Call pytest_sessionfinish with successful exit status
@@ -1499,7 +1536,9 @@ class TestDeltaNoSave:
         plugin = DeltaPlugin(config)
         plugin.delta_manager = Mock()
 
+        # Mock session object - configure config to not have workerinput (not xdist worker)
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 1
 
         # Call pytest_sessionfinish with successful exit status
@@ -1532,7 +1571,9 @@ class TestDeltaNoSave:
         plugin = DeltaPlugin(config)
         plugin.delta_manager = Mock()
 
+        # Mock session object - configure config to not have workerinput (not xdist worker)
         session = Mock()
+        session.config = Mock(spec=[])
         session.testscollected = 1
 
         # Call pytest_sessionfinish with failed exit status
@@ -1635,7 +1676,9 @@ class TestConfigurableDirectories:
             (integration_tests_dir / "test_integration.py").touch()
 
             # Create analyzer with custom test dirs
-            analyzer = DependencyAnalyzer(temp_path, test_dirs=["unit_tests", "integration_tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, test_dirs=["unit_tests", "integration_tests"]
+            )
             test_files = analyzer._find_test_files()
 
             assert len(test_files) == 2
@@ -1707,9 +1750,9 @@ class TestConfigurableDirectories:
             for file_path_str, expected in test_cases:
                 file_path = temp_path / file_path_str
                 is_test = analyzer._is_test_file(file_path, file_path_str)
-                assert is_test == expected, (
-                    f"Failed for {file_path_str}: expected {expected}, got {is_test}"
-                )
+                assert (
+                    is_test == expected
+                ), f"Failed for {file_path_str}: expected {expected}, got {is_test}"
 
 
 class TestUnstagedChangesBugFix:
@@ -1734,7 +1777,9 @@ class TestUnstagedChangesBugFix:
             test_calculator_file = tests_dir / "test_calculator.py"
             test_calculator_file.write_text("from calculator import add")
 
-            analyzer = DependencyAnalyzer(temp_path, source_dirs=["src"], test_dirs=["tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, source_dirs=["src"], test_dirs=["tests"]
+            )
 
             all_files = {calculator_file, test_calculator_file}
 
@@ -1753,7 +1798,9 @@ class TestUnstagedChangesBugFix:
             # Initialize git repository
             repo = Repo.init(temp_path)
             repo.config_writer().set_value("user", "name", "Test User").release()
-            repo.config_writer().set_value("user", "email", "test@example.com").release()
+            repo.config_writer().set_value(
+                "user", "email", "test@example.com"
+            ).release()
 
             # Create project structure
             src_dir = temp_path / "src"
@@ -1787,7 +1834,9 @@ def test_add():
             # Make unstaged change to source file
             calculator_file.write_text("def add(x, y):\n    return x + y + 1\n")
 
-            analyzer = DependencyAnalyzer(temp_path, source_dirs=[".", "src"], test_dirs=["tests"])
+            analyzer = DependencyAnalyzer(
+                temp_path, source_dirs=[".", "src"], test_dirs=["tests"]
+            )
 
             # Build dependency graph
             dependency_graph = analyzer.build_dependency_graph()
@@ -1798,8 +1847,91 @@ def test_add():
 
             # When source file changes, test file should be affected
             changed_files = {calculator_file}
-            affected_files = analyzer.find_affected_files(changed_files, dependency_graph)
+            affected_files = analyzer.find_affected_files(
+                changed_files, dependency_graph
+            )
 
             # Both source and test files should be affected
             assert calculator_file in affected_files
             assert test_calculator_file in affected_files
+
+
+class TestXdistCompatibility:
+    """Test cases for pytest-xdist compatibility."""
+
+    def _create_mock_config(self, **options):
+        """Create a mock config with default options."""
+        defaults = {
+            "--delta-filename": ".delta",
+            "--delta-dir": ".",
+            "--delta-force": False,
+            "--delta-ignore": [],
+            "--delta-vis": False,
+            "--delta-debug": False,
+            "--delta-pass-if-no-tests": False,
+            "--delta-no-save": False,
+            "--delta-source-dirs": [],
+            "--delta-test-dirs": [],
+        }
+        defaults.update(options)
+
+        config = Mock()
+        config.getoption.side_effect = lambda opt: defaults.get(opt, [])
+        return config
+
+    def test_is_xdist_worker_detection(self):
+        """Test that xdist worker detection works correctly."""
+        config = self._create_mock_config()
+        plugin = DeltaPlugin(config)
+
+        # Mock session with workerinput (xdist worker)
+        worker_session = Mock()
+        worker_session.config = Mock()
+        worker_session.config.workerinput = {"workerid": "gw0"}
+
+        assert plugin._is_xdist_worker(worker_session) is True
+
+        # Mock session without workerinput (not xdist worker)
+        controller_session = Mock()
+        controller_session.config = Mock(spec=[])
+
+        assert plugin._is_xdist_worker(controller_session) is False
+
+    def test_session_finish_skips_save_on_xdist_worker(self):
+        """Test that pytest_sessionfinish skips saving on xdist workers."""
+        config = self._create_mock_config()
+        plugin = DeltaPlugin(config)
+        plugin.delta_manager = Mock()
+
+        # Mock xdist worker session
+        session = Mock()
+        session.config = Mock()
+        session.config.workerinput = {"workerid": "gw0"}
+        session.testscollected = 1
+
+        # Call pytest_sessionfinish with successful exit status
+        plugin.pytest_sessionfinish(session, exitstatus=0)
+
+        # Verify that update_metadata was NOT called (worker should skip)
+        plugin.delta_manager.update_metadata.assert_not_called()
+
+    @patch("builtins.print")
+    def test_session_finish_saves_on_controller(self, mock_print):
+        """Test that pytest_sessionfinish saves on controller/non-xdist runs."""
+        config = self._create_mock_config()
+        plugin = DeltaPlugin(config)
+        plugin.delta_manager = Mock()
+
+        # Mock controller session (no workerinput)
+        session = Mock()
+        session.config = Mock(spec=[])
+        session.testscollected = 1
+
+        # Call pytest_sessionfinish with successful exit status
+        plugin.pytest_sessionfinish(session, exitstatus=0)
+
+        # Verify that update_metadata WAS called (controller should save)
+        plugin.delta_manager.update_metadata.assert_called_once()
+
+        # Verify success message was printed
+        mock_print.assert_any_call("[pytest-delta] Delta metadata updated successfully")
