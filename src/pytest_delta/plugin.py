@@ -89,17 +89,60 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure the plugin if --delta flag is used."""
-    # Skip registering on xdist workers - only controller needs the plugin
-    # Workers receive already-filtered test list from controller
-    if hasattr(config, "workerinput"):
-        return
-
     if (
         config.getoption("--delta")
         or config.getoption("--delta-vis")
         or config.getoption("--delta-debug")
     ):
-        config.pluginmanager.register(DeltaPlugin(config), "delta-plugin")
+        # Check if running as xdist worker
+        is_xdist_worker = hasattr(config, "workerinput")
+
+        if is_xdist_worker:
+            # On workers: create a lightweight plugin that uses pre-computed data
+            config.pluginmanager.register(DeltaPluginWorker(config), "delta-plugin-worker")
+        else:
+            # On controller or non-xdist: full plugin with analysis
+            config.pluginmanager.register(DeltaPlugin(config), "delta-plugin")
+
+
+class DeltaPluginWorker:
+    """Lightweight plugin for xdist workers - uses pre-computed affected files."""
+
+    def __init__(self, config: pytest.Config):
+        self.config = config
+        self.affected_test_files: Set[Path] = set()
+        self.should_run_all = False
+
+        # Get affected files from controller via workerinput
+        workerinput = getattr(config, "workerinput", {})
+        delta_data = workerinput.get("delta_affected_files")
+
+        if delta_data is None:
+            # No delta data from controller - run all tests
+            self.should_run_all = True
+        elif delta_data == "__ALL__":
+            # Controller indicated all tests should run
+            self.should_run_all = True
+        else:
+            # Convert string paths back to Path objects
+            self.affected_test_files = {Path(p) for p in delta_data}
+
+    def pytest_collection_modifyitems(
+        self, config: pytest.Config, items: List[pytest.Item]
+    ) -> None:
+        """Filter tests on worker based on pre-computed affected files from controller."""
+        if not config.getoption("--delta"):
+            return
+
+        if self.should_run_all:
+            return
+
+        if not self.affected_test_files:
+            items.clear()
+            return
+
+        # Filter to only affected tests
+        items[:] = [item for item in items if Path(item.fspath) in self.affected_test_files]
 
 
 class DeltaPlugin:

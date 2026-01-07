@@ -1900,9 +1900,9 @@ class TestXdistCompatibility:
         # Verify success message was printed
         mock_print.assert_any_call("[pytest-delta] Delta metadata updated successfully")
 
-    def test_pytest_configure_skips_plugin_on_xdist_worker(self):
-        """Test that pytest_configure skips registering plugin on xdist workers."""
-        from pytest_delta.plugin import pytest_configure
+    def test_pytest_configure_registers_worker_plugin_on_xdist_worker(self):
+        """Test that pytest_configure registers lightweight worker plugin on xdist workers."""
+        from pytest_delta.plugin import DeltaPluginWorker, pytest_configure
 
         # Mock config as xdist worker (has workerinput)
         worker_config = Mock()
@@ -1913,11 +1913,15 @@ class TestXdistCompatibility:
             "--delta-debug": False,
         }.get(opt, False)
 
-        # Call pytest_configure - should NOT register plugin
+        # Call pytest_configure - should register worker plugin
         pytest_configure(worker_config)
 
-        # Verify plugin was NOT registered on worker
-        worker_config.pluginmanager.register.assert_not_called()
+        # Verify worker plugin WAS registered
+        worker_config.pluginmanager.register.assert_called_once()
+        # Verify it's the worker plugin, not the full plugin
+        call_args = worker_config.pluginmanager.register.call_args
+        assert isinstance(call_args[0][0], DeltaPluginWorker)
+        assert call_args[0][1] == "delta-plugin-worker"
 
     def test_pytest_configure_registers_plugin_on_controller(self):
         """Test that pytest_configure registers plugin on controller/non-xdist."""
@@ -1944,3 +1948,141 @@ class TestXdistCompatibility:
 
         # Verify plugin WAS registered on controller
         controller_config.pluginmanager.register.assert_called_once()
+
+    def test_worker_plugin_filters_tests_based_on_affected_files(self):
+        """Test that DeltaPluginWorker filters tests based on affected files from controller."""
+        from pytest_delta.plugin import DeltaPluginWorker
+
+        # Mock config with affected files from controller
+        config = Mock()
+        config.workerinput = {
+            "delta_affected_files": [
+                "/path/to/tests/test_a.py",
+                "/path/to/tests/test_b.py",
+            ]
+        }
+        config.getoption.side_effect = lambda opt: {
+            "--delta": True,
+        }.get(opt, False)
+
+        worker_plugin = DeltaPluginWorker(config)
+
+        # Verify affected files were loaded
+        assert worker_plugin.affected_test_files == {
+            Path("/path/to/tests/test_a.py"),
+            Path("/path/to/tests/test_b.py"),
+        }
+        assert worker_plugin.should_run_all is False
+
+        # Create mock test items
+        item_a = Mock()
+        item_a.fspath = "/path/to/tests/test_a.py"
+        item_b = Mock()
+        item_b.fspath = "/path/to/tests/test_b.py"
+        item_c = Mock()
+        item_c.fspath = "/path/to/tests/test_c.py"  # Not affected
+
+        items = [item_a, item_b, item_c]
+
+        # Call collection modifier
+        worker_plugin.pytest_collection_modifyitems(config, items)
+
+        # Verify only affected tests remain
+        assert len(items) == 2
+        assert item_a in items
+        assert item_b in items
+        assert item_c not in items
+
+    def test_worker_plugin_runs_all_when_controller_says_all(self):
+        """Test that DeltaPluginWorker runs all tests when controller indicates __ALL__."""
+        from pytest_delta.plugin import DeltaPluginWorker
+
+        # Mock config with __ALL__ from controller
+        config = Mock()
+        config.workerinput = {"delta_affected_files": "__ALL__"}
+        config.getoption.side_effect = lambda opt: {
+            "--delta": True,
+        }.get(opt, False)
+
+        worker_plugin = DeltaPluginWorker(config)
+
+        assert worker_plugin.should_run_all is True
+
+        # Create mock test items
+        items = [Mock(), Mock(), Mock()]
+        original_count = len(items)
+
+        # Call collection modifier - should not filter
+        worker_plugin.pytest_collection_modifyitems(config, items)
+
+        # All tests should remain
+        assert len(items) == original_count
+
+    def test_worker_plugin_skips_all_when_no_affected_files(self):
+        """Test that DeltaPluginWorker skips all tests when no files affected."""
+        from pytest_delta.plugin import DeltaPluginWorker
+
+        # Mock config with empty affected files from controller
+        config = Mock()
+        config.workerinput = {"delta_affected_files": []}
+        config.getoption.side_effect = lambda opt: {
+            "--delta": True,
+        }.get(opt, False)
+
+        worker_plugin = DeltaPluginWorker(config)
+
+        assert worker_plugin.should_run_all is False
+        assert worker_plugin.affected_test_files == set()
+
+        # Create mock test items
+        items = [Mock(), Mock(), Mock()]
+
+        # Call collection modifier - should clear all
+        worker_plugin.pytest_collection_modifyitems(config, items)
+
+        # All tests should be removed
+        assert len(items) == 0
+
+    def test_controller_passes_affected_files_to_workers(self):
+        """Test that DeltaPlugin passes affected files to xdist worker nodes."""
+        config = self._create_mock_config()
+        plugin = DeltaPlugin(config)
+
+        # Set up affected files
+        plugin.affected_files = {
+            Path("/path/to/test_a.py"),
+            Path("/path/to/test_b.py"),
+        }
+        plugin.should_run_all = False
+        plugin._analysis_done = True
+
+        # Mock worker node
+        node = Mock()
+        node.workerinput = {}
+
+        # Call pytest_configure_node
+        plugin.pytest_configure_node(node)
+
+        # Verify affected files were passed
+        assert "delta_affected_files" in node.workerinput
+        passed_files = set(node.workerinput["delta_affected_files"])
+        assert passed_files == {"/path/to/test_a.py", "/path/to/test_b.py"}
+
+    def test_controller_passes_all_marker_when_should_run_all(self):
+        """Test that DeltaPlugin passes __ALL__ marker when all tests should run."""
+        config = self._create_mock_config()
+        plugin = DeltaPlugin(config)
+
+        # Set up to run all tests
+        plugin.should_run_all = True
+        plugin._analysis_done = True
+
+        # Mock worker node
+        node = Mock()
+        node.workerinput = {}
+
+        # Call pytest_configure_node
+        plugin.pytest_configure_node(node)
+
+        # Verify __ALL__ marker was passed
+        assert node.workerinput["delta_affected_files"] == "__ALL__"
