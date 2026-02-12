@@ -1,3 +1,3 @@
-"""pytest-delta: A pytest plugin that filters tests based on changed files."""
+"""pytest-delta: Run only tests affected by code changes."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

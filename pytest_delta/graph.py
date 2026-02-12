@@ -1,382 +1,209 @@
-"""Dependency graph builder using AST analysis."""
-
 from __future__ import annotations
 
 import ast
 import hashlib
-from collections import defaultdict
+from collections import deque
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .config import DeltaConfig
+SKIP_DIRS = frozenset({
+    ".venv",
+    "venv",
+    ".env",
+    "env",
+    "__pycache__",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "build",
+    "dist",
+    ".eggs",
+    ".tox",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+})
 
 
 def compute_file_hash(file_path: Path) -> str:
-    """Compute a SHA-256 hash of a file's contents.
-
-    Args:
-        file_path: Path to the file.
-
-    Returns:
-        The first 16 characters of the SHA-256 hash.
-    """
-    content = file_path.read_bytes()
-    return hashlib.sha256(content).hexdigest()[:16]
+    h = hashlib.sha256(file_path.read_bytes())
+    return h.hexdigest()[:16]
 
 
-def extract_imports(file_path: Path) -> set[str]:
-    """Extract all import statements from a Python file.
+def discover_py_files(root: Path) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    for path in root.rglob("*.py"):
+        # Skip files in excluded directories
+        parts = path.relative_to(root).parts
+        if any(part in SKIP_DIRS or part.startswith(".") for part in parts[:-1]):
+            continue
+        rel = str(path.relative_to(root))
+        result[rel] = path
+    return result
 
-    Args:
-        file_path: Path to the Python file.
 
-    Returns:
-        A set of full module paths that are imported.
-    """
+def compute_hashes(files: dict[str, Path]) -> dict[str, str]:
+    return {rel: compute_file_hash(abs_path) for rel, abs_path in files.items()}
+
+
+def extract_imports(file_path: Path, rel_path: str) -> set[str]:
     try:
-        content = file_path.read_text(encoding="utf-8")
-        tree = ast.parse(content, filename=str(file_path))
-    except (SyntaxError, UnicodeDecodeError):
-        # Skip files that can't be parsed
+        source = file_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(file_path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
         return set()
 
     imports: set[str] = set()
+    # Compute the package parts for resolving relative imports
+    rel_parts = Path(rel_path).parts
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                # Keep the full module path
                 imports.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                # Keep the full module path
-                imports.add(node.module)
+            if node.level == 0:
+                # Absolute import
+                if node.module:
+                    imports.add(node.module)
+            else:
+                # Relative import: resolve using file's package position
+                # For a file at pkg/sub/mod.py, the package is ["pkg", "sub"]
+                # For __init__.py at pkg/sub/__init__.py, the package is ["pkg", "sub"]
+                if rel_parts[-1] == "__init__.py":
+                    package_parts = list(rel_parts[:-1])
+                else:
+                    package_parts = list(rel_parts[:-1])
+
+                # Go up `level` packages
+                # level=1 means current package, level=2 means parent, etc.
+                up = node.level - 1
+                if up > len(package_parts):
+                    continue  # Invalid relative import, skip
+                if up > 0:
+                    package_parts = package_parts[:-up]
+
+                if node.module:
+                    resolved = ".".join(package_parts + [node.module]) if package_parts else node.module
+                else:
+                    resolved = ".".join(package_parts) if package_parts else None
+
+                if resolved:
+                    imports.add(resolved)
 
     return imports
 
 
-def resolve_module_to_file(
-    module_name: str,
-    python_files: dict[str, Path],
-    root_path: Path,
-) -> Path | None:
-    """Resolve a module name to a file path.
+def build_module_map(py_files: dict[str, Path]) -> dict[str, str]:
+    module_map: dict[str, str] = {}
+    for rel_path in py_files:
+        parts = Path(rel_path).parts
+        # Convert path to module name
+        if parts[-1] == "__init__.py":
+            # Package: pkg/sub/__init__.py -> pkg.sub
+            module_parts = parts[:-1]
+        else:
+            # Module: pkg/sub/mod.py -> pkg.sub.mod
+            module_parts = parts[:-1] + (parts[-1].removesuffix(".py"),)
 
-    Args:
-        module_name: The module name to resolve.
-        python_files: Dict mapping relative paths to absolute paths.
-        root_path: The project root path.
+        if module_parts:
+            module_name = ".".join(module_parts)
+            module_map[module_name] = rel_path
 
-    Returns:
-        The resolved file path, or None if not found in the project.
-    """
-    # Try different possible file locations
-    possible_paths = [
-        f"{module_name}.py",
-        f"{module_name}/__init__.py",
-        f"src/{module_name}.py",
-        f"src/{module_name}/__init__.py",
-    ]
+            # Also register without src. prefix for projects using src layout
+            if module_parts[0] == "src" and len(module_parts) > 1:
+                alt_name = ".".join(module_parts[1:])
+                module_map.setdefault(alt_name, rel_path)
 
-    for possible_path in possible_paths:
-        if possible_path in python_files:
-            return python_files[possible_path]
+    return module_map
 
+
+def resolve_import(module_name: str, module_map: dict[str, str]) -> str | None:
+    # Exact match
+    if module_name in module_map:
+        return module_map[module_name]
+    # Try progressively shorter prefixes (from X.Y.Z import something -> try X.Y, then X)
+    parts = module_name.split(".")
+    for i in range(len(parts) - 1, 0, -1):
+        prefix = ".".join(parts[:i])
+        if prefix in module_map:
+            return module_map[prefix]
     return None
 
 
-class DependencyGraph:
-    """A dependency graph built from static import analysis.
+def _get_init_files_for_import(resolved_path: str, py_files: dict[str, Path]) -> set[str]:
+    """Get all __init__.py files along the path of an import."""
+    parts = Path(resolved_path).parts
+    init_files: set[str] = set()
+    for i in range(1, len(parts)):
+        init_path = str(Path(*parts[:i]) / "__init__.py")
+        if init_path in py_files:
+            init_files.add(init_path)
+    return init_files
 
-    Attributes:
-        forward_graph: Maps file -> set of files it imports.
-        reverse_graph: Maps file -> set of files that import it (transitively).
-        file_hashes: Maps file -> content hash for cache invalidation.
-    """
 
-    def __init__(self) -> None:
-        """Initialize an empty dependency graph."""
-        # Maps: relative_path -> set of relative_paths it directly imports
-        self.forward_graph: dict[str, set[str]] = defaultdict(set)
-        # Maps: relative_path -> set of relative_paths that depend on it (transitive)
-        self.reverse_graph: dict[str, set[str]] = defaultdict(set)
-        # Maps: relative_path -> content hash
-        self.file_hashes: dict[str, str] = {}
+def build_forward_graph(
+    py_files: dict[str, Path], module_map: dict[str, str]
+) -> dict[str, set[str]]:
+    forward: dict[str, set[str]] = {rel: set() for rel in py_files}
+    for rel_path, abs_path in py_files.items():
+        imports = extract_imports(abs_path, rel_path)
+        for module_name in imports:
+            resolved = resolve_import(module_name, module_map)
+            if resolved and resolved != rel_path:
+                forward[rel_path].add(resolved)
+                # Also add __init__.py files along the import path
+                for init_file in _get_init_files_for_import(resolved, py_files):
+                    if init_file != rel_path:
+                        forward[rel_path].add(init_file)
+    return forward
 
-    def build(
-        self,
-        root_path: Path,
-        config: DeltaConfig,
-        force_rebuild: bool = False,
-    ) -> None:
-        """Build the dependency graph from Python files.
 
-        This method can work incrementally if the graph already has data.
-        Only files with changed hashes will be reprocessed.
+def build_reverse_graph(forward: dict[str, set[str]]) -> dict[str, set[str]]:
+    # Build direct reverse edges
+    direct_reverse: dict[str, set[str]] = {k: set() for k in forward}
+    for file, deps in forward.items():
+        for dep in deps:
+            if dep not in direct_reverse:
+                direct_reverse[dep] = set()
+            direct_reverse[dep].add(file)
 
-        Args:
-            root_path: The project root path.
-            config: The delta configuration.
-            force_rebuild: If True, rebuild the entire graph from scratch.
-        """
-        existing_hashes = {} if force_rebuild else dict(self.file_hashes)
-
-        if force_rebuild:
-            # Clear existing data
-            self.forward_graph.clear()
-            self.reverse_graph.clear()
-            self.file_hashes.clear()
-
-        # Find all Python files
-        python_files = self._discover_python_files(root_path, config)
-
-        config.debug_print(f"Found {len(python_files)} Python files")
-
-        # Remove files that no longer exist
-        existing_files_to_remove = set(self.file_hashes.keys()) - set(
-            python_files.keys()
-        )
-        for old_file in existing_files_to_remove:
-            self.file_hashes.pop(old_file, None)
-            self.forward_graph.pop(old_file, None)
-
-        # Build file hashes and determine which files need reprocessing
-        files_to_process: set[str] = set()
-
-        for rel_path, abs_path in python_files.items():
-            current_hash = compute_file_hash(abs_path)
-
-            if existing_hashes.get(rel_path) != current_hash:
-                files_to_process.add(rel_path)
-
-            self.file_hashes[rel_path] = current_hash
-
-        config.debug_print(
-            f"Processing {len(files_to_process)} changed files "
-            f"(rebuild={force_rebuild})"
-        )
-
-        # Build module name to file mapping for import resolution
-        module_map = self._build_module_map(python_files, root_path)
-
-        # Process each file that needs updating
-        for rel_path in files_to_process:
-            abs_path = python_files[rel_path]
-            imports = extract_imports(abs_path)
-
-            # Resolve imports to file paths
-            self.forward_graph[rel_path] = set()
-            for module_name in imports:
-                resolved = self._resolve_import(module_name, module_map, rel_path)
-                if resolved:
-                    self.forward_graph[rel_path].add(resolved)
-
-        # Build the transitive reverse graph
-        self._build_reverse_graph()
-
-        config.debug_print(
-            f"Graph built: {len(self.forward_graph)} files, "
-            f"{sum(len(deps) for deps in self.reverse_graph.values())} dependencies"
-        )
-
-    def _discover_python_files(
-        self,
-        root_path: Path,
-        config: DeltaConfig,
-    ) -> dict[str, Path]:
-        """Discover all Python files in the project.
-
-        Args:
-            root_path: The project root path.
-            config: The delta configuration.
-
-        Returns:
-            Dict mapping relative paths to absolute paths.
-        """
-        python_files: dict[str, Path] = {}
-
-        for abs_path in root_path.rglob("*.py"):
-            # Skip common non-source directories
-            parts = abs_path.relative_to(root_path).parts
-            if any(
-                part.startswith(".")
-                or part
-                in (
-                    "venv",
-                    ".venv",
-                    "env",
-                    ".env",
-                    "__pycache__",
-                    "node_modules",
-                    "build",
-                    "dist",
-                    ".git",
-                )
-                for part in parts
-            ):
+    # Compute transitive closure via BFS from each node
+    reverse: dict[str, set[str]] = {}
+    for start in direct_reverse:
+        visited: set[str] = set()
+        queue = deque(direct_reverse.get(start, set()))
+        while queue:
+            node = queue.popleft()
+            if node in visited:
                 continue
+            visited.add(node)
+            queue.extend(direct_reverse.get(node, set()) - visited)
+        reverse[start] = visited
 
-            rel_path = str(abs_path.relative_to(root_path))
+    return reverse
 
-            # Check ignore patterns
-            if config.should_ignore(rel_path):
-                continue
 
-            python_files[rel_path] = abs_path
+def get_affected_files(changed: set[str], reverse: dict[str, set[str]]) -> set[str]:
+    affected = set(changed)
+    for file in changed:
+        affected |= reverse.get(file, set())
+    return affected
 
-        return python_files
 
-    def _build_module_map(
-        self,
-        python_files: dict[str, Path],
-        root_path: Path,
-    ) -> dict[str, str]:
-        """Build a mapping from module names to file paths.
-
-        Args:
-            python_files: Dict mapping relative paths to absolute paths.
-            root_path: The project root path.
-
-        Returns:
-            Dict mapping module names to relative file paths.
-        """
-        module_map: dict[str, str] = {}
-
-        for rel_path in python_files:
-            path = Path(rel_path)
-
-            # Handle regular modules (foo.py -> foo)
-            if path.name != "__init__.py":
-                # Remove .py extension and convert path separators
-                module_name = (
-                    str(path.with_suffix("")).replace("/", ".").replace("\\", ".")
-                )
-                module_map[module_name] = rel_path
-
-                # Also map without src/ prefix if present
-                if module_name.startswith("src."):
-                    module_map[module_name[4:]] = rel_path
+def apply_conftest_rule(
+    changed_files: set[str], affected: set[str], all_test_files: set[str]
+) -> set[str]:
+    result = set(affected)
+    for changed_file in changed_files:
+        if Path(changed_file).name == "conftest.py":
+            # Get the directory of the conftest
+            conftest_dir = str(Path(changed_file).parent)
+            if conftest_dir == ".":
+                # Root conftest: affects all tests
+                result |= all_test_files
             else:
-                # Handle packages (foo/__init__.py -> foo)
-                package_path = path.parent
-                module_name = str(package_path).replace("/", ".").replace("\\", ".")
-                if module_name:
-                    module_map[module_name] = rel_path
-
-                    # Also map without src/ prefix if present
-                    if module_name.startswith("src."):
-                        module_map[module_name[4:]] = rel_path
-
-        return module_map
-
-    def _resolve_import(
-        self,
-        module_name: str,
-        module_map: dict[str, str],
-        importing_file: str,
-    ) -> str | None:
-        """Resolve an import to a file path within the project.
-
-        Args:
-            module_name: The imported module name.
-            module_map: Mapping from module names to file paths.
-            importing_file: The file doing the import (for relative imports).
-
-        Returns:
-            The resolved relative file path, or None if external.
-        """
-        # Try exact match first
-        if module_name in module_map:
-            return module_map[module_name]
-
-        # Try as a submodule (import foo might be foo.bar.baz)
-        for mapped_module, file_path in module_map.items():
-            if mapped_module.startswith(module_name + "."):
-                # This is a submodule, but we want the top-level package
-                # Return the __init__.py of the top-level package if it exists
-                parts = mapped_module.split(".")
-                for i in range(len(parts)):
-                    prefix = ".".join(parts[: i + 1])
-                    if prefix in module_map:
-                        return module_map[prefix]
-
-        return None
-
-    def _build_reverse_graph(self) -> None:
-        """Build the transitive reverse dependency graph."""
-        # First, build direct reverse graph
-        direct_reverse: dict[str, set[str]] = defaultdict(set)
-        for file_path, dependencies in self.forward_graph.items():
-            for dep in dependencies:
-                direct_reverse[dep].add(file_path)
-
-        # Now compute transitive closure
-        self.reverse_graph = defaultdict(set)
-
-        for file_path in direct_reverse:
-            # BFS to find all files that transitively depend on this file
-            visited: set[str] = set()
-            queue = list(direct_reverse[file_path])
-
-            while queue:
-                current = queue.pop(0)
-                if current in visited:
-                    continue
-                visited.add(current)
-
-                # Add files that directly depend on current
-                for dep in direct_reverse.get(current, []):
-                    if dep not in visited:
-                        queue.append(dep)
-
-            self.reverse_graph[file_path] = visited
-
-    def get_affected_files(self, changed_files: set[str]) -> set[str]:
-        """Get all files affected by changes to the given files.
-
-        Args:
-            changed_files: Set of files that have changed.
-
-        Returns:
-            Set of all files that are affected (including the changed files).
-        """
-        affected: set[str] = set(changed_files)
-
-        for changed_file in changed_files:
-            # Add all files that depend on the changed file
-            affected.update(self.reverse_graph.get(changed_file, set()))
-
-        return affected
-
-    def to_dict(self) -> dict:
-        """Serialize the graph to a dictionary.
-
-        Returns:
-            A dictionary representation of the graph.
-        """
-        return {
-            "forward": {k: list(v) for k, v in self.forward_graph.items()},
-            "reverse": {k: list(v) for k, v in self.reverse_graph.items()},
-            "hashes": self.file_hashes,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> DependencyGraph:
-        """Deserialize a graph from a dictionary.
-
-        Args:
-            data: A dictionary representation of the graph.
-
-        Returns:
-            A DependencyGraph instance.
-        """
-        graph = cls()
-        graph.forward_graph = defaultdict(
-            set, {k: set(v) for k, v in data.get("forward", {}).items()}
-        )
-        graph.reverse_graph = defaultdict(
-            set, {k: set(v) for k, v in data.get("reverse", {}).items()}
-        )
-        graph.file_hashes = data.get("hashes", {})
-        return graph
+                # Subdirectory conftest: affects tests in that subtree
+                prefix = conftest_dir + "/"
+                result |= {t for t in all_test_files if t.startswith(prefix)}
+    return result

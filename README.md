@@ -1,6 +1,16 @@
 # pytest-delta
 
-A pytest plugin that filters tests to only those affected by changes since the last successful run.
+A pytest plugin that runs only the tests affected by your code changes. Instead of running your entire test suite every time, pytest-delta uses content hashing and AST-based dependency analysis to figure out which tests actually need to run.
+
+## How It Works
+
+1. On the **first run**, all tests execute normally. pytest-delta builds a dependency graph by parsing imports across your Python files and saves a snapshot (file hashes + graph) to a `.delta.msgpack` file.
+
+2. On **subsequent runs**, it compares current file hashes against the snapshot to detect changes. Using the reverse dependency graph, it identifies all files transitively affected by those changes and runs only the corresponding tests.
+
+3. If a `conftest.py` changes, all tests in its directory and subdirectories are re-run (conservative approach).
+
+4. The delta file is only updated when all tests pass. If tests fail, the previous snapshot is preserved so those tests run again next time.
 
 ## Installation
 
@@ -8,62 +18,111 @@ A pytest plugin that filters tests to only those affected by changes since the l
 pip install pytest-delta
 ```
 
-## Usage
+Or with Poetry:
 
 ```bash
-# Enable delta filtering
+poetry add pytest-delta
+```
+
+## Usage
+
+Enable the plugin with the `--delta` flag:
+
+```bash
+# First run: executes all tests, creates .delta.msgpack
 pytest --delta
 
-# With debug output
-pytest --delta --delta-debug
+# Second run: no changes detected, exits 0 immediately
+pytest --delta
 
-# With pytest-xdist for parallel execution
-pytest --delta -n auto
+# After modifying src/utils.py: only affected tests run
+pytest --delta
+```
+
+Use `--delta-debug` to see what the plugin is doing:
+
+```bash
+pytest --delta --delta-debug
+```
+
+```
+[pytest-delta] Plugin enabled
+[pytest-delta] Loaded delta: 42 files tracked
+[pytest-delta] Changed: 1, New: 0, Deleted: 0
+[pytest-delta] Affected test files: 3
+[pytest-delta]   tests/test_api.py
+[pytest-delta]   tests/test_models.py
+[pytest-delta]   tests/test_utils.py
+[pytest-delta] Selected: 12, Deselected: 85
 ```
 
 ## CLI Options
 
-| Flag | Description |
-|------|-------------|
-| `--delta` | Enable delta filtering |
-| `--delta-file PATH` | Custom delta file path (default: `.delta.msgpack` in project root) |
-| `--delta-debug` | Show debug info: changed files, affected files, graph stats |
-| `--delta-pass-if-no-tests` | Exit 0 when no tests need to run |
-| `--delta-no-save` | Don't update delta file after run (read-only mode for CI/CD) |
-| `--delta-ignore PATTERN` | Ignore file pattern (repeatable) |
-| `--delta-rebuild` | Force rebuild dependency graph |
+| Option | Description |
+|--------|-------------|
+| `--delta` | Enable delta-based test filtering |
+| `--delta-file PATH` | Custom delta file path (default: `.delta.msgpack`) |
+| `--delta-rebuild` | Force rebuild the dependency graph from scratch |
+| `--delta-no-save` | Don't save the delta file after the run (read-only mode) |
+| `--delta-debug` | Print debug information about filtering decisions |
 
 ## Markers
+
+Force specific tests to always run regardless of changes:
 
 ```python
 import pytest
 
 @pytest.mark.delta_always
-def test_critical():
-    """This test runs on every invocation regardless of changes."""
-    ...
+def test_smoke():
+    """This test runs every time, even if nothing changed."""
+    assert app.health_check() == "ok"
 ```
 
-## How It Works
+## CI Workflow
 
-1. On first run, builds a dependency graph by analyzing Python imports
-2. Saves a `.delta.msgpack` file with the current commit SHA and graph
-3. On subsequent runs, compares current state to last successful run
-4. Only runs tests that depend on changed files (transitively)
+A typical workflow:
 
-## CI Integration
+1. Developer runs `pytest --delta` locally. Tests pass, `.delta.msgpack` is updated.
+2. Developer commits the delta file along with their changes.
+3. CI runs `pytest --delta`. Since the delta file reflects the already-validated state, no tests need to run and CI exits 0 immediately.
 
-```yaml
-# .github/workflows/test.yml
-jobs:
-  test:
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Need full history for git diff
+For CI pipelines where you want to prevent accidental delta file updates:
 
-      - name: Run affected tests
-        run: pytest --delta --delta-pass-if-no-tests -n auto
+```bash
+pytest --delta --delta-no-save
+```
+
+## Change Detection
+
+pytest-delta uses **content hashing** (SHA-256) to detect changes. This means:
+
+- No dependency on git history or commit hashes
+- Works with uncommitted and staged changes
+- No issues with rebasing or squash merges
+- Detects changes regardless of how they were made
+
+## Dependency Analysis
+
+The plugin builds a dependency graph by parsing Python AST import statements:
+
+- Handles absolute imports (`import pkg.mod`, `from pkg.mod import func`)
+- Handles relative imports (`from .utils import helper`, `from ..core import Base`)
+- Tracks `__init__.py` as implicit dependencies of package modules
+- Computes transitive closure: if A imports B and B imports C, changing C re-runs tests for both A and B
+
+Limitations:
+- Only tracks `.py` files (non-Python config/data files are ignored)
+- Dynamic imports (`importlib.import_module()`) are not detected
+- Only project-local imports are tracked (third-party packages are ignored)
+
+## Configuration
+
+Add `.delta.msgpack` to your `.gitignore` if you don't want to share the delta file across developers, or commit it if you want the CI optimization described above.
+
+```gitignore
+# Uncomment to exclude from version control
+# .delta.msgpack
 ```
 
 ## License

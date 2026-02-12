@@ -1,162 +1,111 @@
-"""Tests for the config module."""
-
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from pytest_delta.config import DeltaConfig
 
 
-class TestDeltaConfig:
-    """Tests for DeltaConfig."""
+def _make_mock_config(
+    delta: bool = False,
+    delta_file: str | None = None,
+    delta_rebuild: bool = False,
+    delta_no_save: bool = False,
+    delta_debug: bool = False,
+    rootpath: Path | None = None,
+) -> MagicMock:
+    config = MagicMock()
+    config.rootpath = rootpath or Path("/project")
 
-    def test_default_values(self) -> None:
-        """Test default configuration values."""
-        config = DeltaConfig()
+    def getoption(name: str, default: object = None) -> object:
+        options = {
+            "delta": delta,
+            "delta_file": delta_file,
+            "delta_rebuild": delta_rebuild,
+            "delta_no_save": delta_no_save,
+            "delta_debug": delta_debug,
+        }
+        return options.get(name, default)
 
-        assert config.enabled is False
-        assert config.delta_file == Path(".delta.msgpack")
-        assert config.debug is False
-        assert config.pass_if_no_tests is False
-        assert config.no_save is False
-        assert config.ignore_patterns == []
-        assert config.rebuild is False
-
-    def test_from_pytest_config(self, tmp_path: Path) -> None:
-        """Test creating config from pytest config."""
-        mock_config = MagicMock()
-        mock_config.rootpath = tmp_path
-        mock_config.getoption = MagicMock(
-            side_effect=lambda key, default=None: {
-                "delta": True,
-                "delta_file": None,
-                "delta_debug": True,
-                "delta_pass_if_no_tests": False,
-                "delta_no_save": True,
-                "delta_ignore": ["*.pyc", "tests/*"],
-                "delta_rebuild": False,
-            }.get(key, default)
-        )
-
-        config = DeltaConfig.from_pytest_config(mock_config)
-
-        assert config.enabled is True
-        assert config.delta_file == tmp_path / ".delta.msgpack"
-        assert config.debug is True
-        assert config.no_save is True
-        assert config.ignore_patterns == ["*.pyc", "tests/*"]
-        assert config.root_path == tmp_path
-
-    def test_from_pytest_config_custom_delta_file(self, tmp_path: Path) -> None:
-        """Test creating config with custom delta file path."""
-        mock_config = MagicMock()
-        mock_config.rootpath = tmp_path
-        mock_config.getoption = MagicMock(
-            side_effect=lambda key, default=None: {
-                "delta": True,
-                "delta_file": "custom/.delta",
-                "delta_debug": False,
-                "delta_pass_if_no_tests": False,
-                "delta_no_save": False,
-                "delta_ignore": [],
-                "delta_rebuild": False,
-            }.get(key, default)
-        )
-
-        config = DeltaConfig.from_pytest_config(mock_config)
-
-        assert config.delta_file == tmp_path / "custom/.delta"
-
-    def test_from_pytest_config_absolute_delta_file(self, tmp_path: Path) -> None:
-        """Test creating config with absolute delta file path."""
-        custom_path = tmp_path / "absolute" / ".delta"
-
-        mock_config = MagicMock()
-        mock_config.rootpath = tmp_path
-        mock_config.getoption = MagicMock(
-            side_effect=lambda key, default=None: {
-                "delta": True,
-                "delta_file": str(custom_path),
-                "delta_debug": False,
-                "delta_pass_if_no_tests": False,
-                "delta_no_save": False,
-                "delta_ignore": [],
-                "delta_rebuild": False,
-            }.get(key, default)
-        )
-
-        config = DeltaConfig.from_pytest_config(mock_config)
-
-        assert config.delta_file == custom_path
+    config.getoption = getoption
+    return config
 
 
-class TestShouldIgnore:
-    """Tests for should_ignore method."""
+class TestDeltaConfigDefaults:
+    def test_defaults(self) -> None:
+        cfg = DeltaConfig()
+        assert cfg.enabled is False
+        assert cfg.delta_file == Path(".delta.msgpack")
+        assert cfg.rebuild is False
+        assert cfg.no_save is False
+        assert cfg.debug is False
 
-    def test_no_patterns_never_ignores(self) -> None:
-        """Test that no patterns means nothing is ignored."""
-        config = DeltaConfig(ignore_patterns=[])
+    def test_from_pytest_config_defaults(self) -> None:
+        mock = _make_mock_config()
+        cfg = DeltaConfig.from_pytest_config(mock)
+        assert cfg.enabled is False
+        assert cfg.delta_file == Path("/project/.delta.msgpack")
+        assert cfg.rebuild is False
+        assert cfg.no_save is False
+        assert cfg.debug is False
+        assert cfg.root_path == Path("/project")
 
-        assert config.should_ignore("any/file.py") is False
-        assert config.should_ignore("test.py") is False
+    def test_from_pytest_config_enabled(self) -> None:
+        mock = _make_mock_config(delta=True, delta_debug=True, delta_no_save=True)
+        cfg = DeltaConfig.from_pytest_config(mock)
+        assert cfg.enabled is True
+        assert cfg.debug is True
+        assert cfg.no_save is True
 
-    def test_exact_pattern_match(self) -> None:
-        """Test exact pattern matching."""
-        config = DeltaConfig(ignore_patterns=["ignored.py"])
+    def test_from_pytest_config_relative_delta_file(self) -> None:
+        mock = _make_mock_config(delta_file="custom/path.msgpack")
+        cfg = DeltaConfig.from_pytest_config(mock)
+        assert cfg.delta_file == Path("/project/custom/path.msgpack")
 
-        assert config.should_ignore("ignored.py") is True
-        assert config.should_ignore("other.py") is False
-
-    def test_wildcard_pattern(self) -> None:
-        """Test wildcard pattern matching."""
-        config = DeltaConfig(ignore_patterns=["*.pyc"])
-
-        assert config.should_ignore("file.pyc") is True
-        assert config.should_ignore("file.py") is False
-
-    def test_directory_pattern(self) -> None:
-        """Test directory pattern matching."""
-        config = DeltaConfig(ignore_patterns=["tests/*"])
-
-        assert config.should_ignore("tests/test_foo.py") is True
-        assert config.should_ignore("src/main.py") is False
-
-    def test_multiple_patterns(self) -> None:
-        """Test multiple ignore patterns."""
-        config = DeltaConfig(ignore_patterns=["*.pyc", "tests/*", "docs/*"])
-
-        assert config.should_ignore("file.pyc") is True
-        assert config.should_ignore("tests/test.py") is True
-        assert config.should_ignore("docs/readme.md") is True
-        assert config.should_ignore("src/main.py") is False
-
-    def test_accepts_path_object(self) -> None:
-        """Test that Path objects are accepted."""
-        config = DeltaConfig(ignore_patterns=["*.pyc"])
-
-        assert config.should_ignore(Path("file.pyc")) is True
+    def test_from_pytest_config_absolute_delta_file(self) -> None:
+        mock = _make_mock_config(delta_file="/absolute/path.msgpack")
+        cfg = DeltaConfig.from_pytest_config(mock)
+        assert cfg.delta_file == Path("/absolute/path.msgpack")
 
 
 class TestDebugPrint:
-    """Tests for debug_print method."""
+    def test_debug_print_enabled(self, capsys: object) -> None:
+        cfg = DeltaConfig(debug=True)
+        cfg.debug_print("hello")
+        import sys
+        import io
 
-    def test_prints_when_debug_enabled(self, capsys) -> None:
-        """Test that messages are printed when debug is enabled."""
-        config = DeltaConfig(debug=True)
+        # Re-test with capsys properly
+        cfg.debug_print("test message")
 
-        config.debug_print("test message")
+    def test_debug_print_disabled(self, capsys: object) -> None:
+        cfg = DeltaConfig(debug=False)
+        cfg.debug_print("should not print")
 
-        captured = capsys.readouterr()
-        assert "[pytest-delta] test message" in captured.out
+    def test_debug_print_format(self) -> None:
+        import io
+        import sys
 
-    def test_no_output_when_debug_disabled(self, capsys) -> None:
-        """Test that nothing is printed when debug is disabled."""
-        config = DeltaConfig(debug=False)
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            cfg = DeltaConfig(debug=True)
+            cfg.debug_print("test msg")
+        finally:
+            sys.stdout = old_stdout
+        assert captured.getvalue().strip() == "[pytest-delta] test msg"
 
-        config.debug_print("test message")
+    def test_debug_print_disabled_no_output(self) -> None:
+        import io
+        import sys
 
-        captured = capsys.readouterr()
-        assert captured.out == ""
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            cfg = DeltaConfig(debug=False)
+            cfg.debug_print("should not appear")
+        finally:
+            sys.stdout = old_stdout
+        assert captured.getvalue() == ""
